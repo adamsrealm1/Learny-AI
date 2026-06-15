@@ -1,9 +1,9 @@
-kind: wasmer.io/App.v0
 name: learny-ai
+app_id: da_K1EIZtMUJ8b7
 owner: adamsrealm1
-package: adamsrealm1/learny-ai@=0.1.0
+package: .
 env:
   PYTHONEXECUTABLE: /bin/python
 cli_args:
 - /src/main.py
-app_id: da_K1EIZtMUJ8b7
+kind: wasmer.io/App.v0

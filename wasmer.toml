@@ -1,9 +1,9 @@
 [package]
 name = "adamsrealm1/learny-ai"
-version = "0.1.0"
+version = "0.1.1"
 description = "Learny AI web app with a Python JSON brain and animated HTML/CSS/JS frontend."
-readme = "README.md"
 license = "MIT"
+readme = "README.md"
 
 [dependencies]
 "wasmer/python" = "^3.12.6"
