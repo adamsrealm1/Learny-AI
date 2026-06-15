@@ -1,0 +1,10 @@
+[project]
+name = "learny-ai"
+version = "0.1.0"
+description = "A local-only Python chatbot that learns from a manually edited JSON file."
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.unittest]
+start-dir = "tests"
+
