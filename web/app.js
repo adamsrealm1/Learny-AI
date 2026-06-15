@@ -55,6 +55,7 @@ function loadStoredChats() {
                 speaker: message.speaker,
                 text: message.text,
                 source: typeof message.source === "string" ? message.source : "",
+                thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
               }))
           : [],
       }));
@@ -93,6 +94,22 @@ function titleFromMessage(message) {
     return "New chat";
   }
   return compact.length > 34 ? `${compact.slice(0, 34)}...` : compact;
+}
+
+function normalizeThoughtSeconds(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return null;
+  }
+  return Math.round(numeric * 10) / 10;
+}
+
+function formatThoughtSeconds(value) {
+  const seconds = normalizeThoughtSeconds(value);
+  if (seconds === null) {
+    return "0";
+  }
+  return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
 }
 
 function setEmptyState(visible) {
@@ -196,13 +213,25 @@ function clearMessages() {
   chatLog.querySelectorAll(".message").forEach((message) => message.remove());
 }
 
-function displayMessage({ speaker, text, source = "" }) {
+function displayMessage({ speaker, text, source = "", thoughtSeconds = null }) {
   setEmptyState(false);
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
   node.classList.add(speaker === "You" ? "user" : "learny");
   node.querySelector(".speaker").textContent = speaker;
   node.querySelector(".source").textContent = source;
-  node.querySelector(".bubble").textContent = text;
+  const bubble = node.querySelector(".bubble");
+  const textNode = document.createElement("span");
+  textNode.className = "bubble-text";
+  textNode.textContent = text;
+  bubble.replaceChildren(textNode);
+
+  if (speaker === "Learny") {
+    const thought = document.createElement("span");
+    thought.className = "thought-time";
+    thought.textContent = `Thought for ${formatThoughtSeconds(thoughtSeconds)} seconds.`;
+    bubble.append(thought);
+  }
+
   chatLog.append(node);
   chatLog.scrollTop = chatLog.scrollHeight;
   return node;
@@ -375,6 +404,7 @@ async function askLearny(message) {
   addMessage({ speaker: "You", text: message, source: "sent" });
 
   const typing = addTyping();
+  const thoughtStartedAt = performance.now();
   isSending = true;
   sendButton.disabled = true;
   messageInput.disabled = true;
@@ -389,10 +419,12 @@ async function askLearny(message) {
     localStorage.setItem(SESSION_KEY, sessionId);
     saveChats();
     typing.remove();
+    const thoughtSeconds = (performance.now() - thoughtStartedAt) / 1000;
     addMessage({
       speaker: "Learny",
       text: data.answer,
       source: sourceLabel(data.source, data.learned, data.model),
+      thoughtSeconds,
     });
     await loadStatus();
   } catch (error) {
