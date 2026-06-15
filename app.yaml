@@ -1,0 +1,9 @@
+---
+kind: wasmer.io/App.v0
+owner: adamsrealm1
+name: learny-ai
+package: adamsrealm1/learny-ai@0.1.0
+cli_args:
+  - /src/main.py
+env:
+  PYTHONEXECUTABLE: /bin/python

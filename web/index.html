@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Learny AI</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Learny navigation">
+        <header class="sidebar-header">
+          <strong>Learny AI</strong>
+          <button class="sidebar-toggle" type="button" title="Collapse sidebar">
+            <span aria-hidden="true">[]</span>
+            <span class="sr-only">Collapse sidebar</span>
+          </button>
+        </header>
+
+        <nav class="sidebar-nav" aria-label="Main navigation">
+          <button class="nav-item active" id="newChatButton" type="button">
+            <span class="nav-icon" aria-hidden="true">+</span>
+            <span>New chat</span>
+          </button>
+          <button class="nav-item" type="button">
+            <span class="nav-icon" aria-hidden="true">?</span>
+            <span>Search chats</span>
+          </button>
+        </nav>
+
+        <section class="chats-panel" aria-label="Saved chats">
+          <div class="panel-heading">
+            <p>CHATS</p>
+            <button class="add-chat-button" id="addChatButton" type="button" title="New chat">
+              <span aria-hidden="true">+</span>
+              <span class="sr-only">New chat</span>
+            </button>
+          </div>
+          <div class="chat-list" id="chatList"></div>
+        </section>
+
+      </aside>
+
+      <main class="main-area">
+        <div class="scene-bg" aria-hidden="true">
+          <div class="depth-stage">
+            <span class="liquid-blob blob-a"></span>
+            <span class="liquid-blob blob-b"></span>
+            <span class="liquid-blob blob-c"></span>
+            <span class="liquid-blob blob-d"></span>
+            <span class="liquid-blob blob-e"></span>
+          </div>
+        </div>
+
+        <header class="top-bar">
+          <div class="connection-pill" id="connectionPill">
+            <span></span>
+            <strong>Checking server status...</strong>
+          </div>
+        </header>
+
+        <section class="chat-panel" aria-label="Learny chat">
+          <div class="chat-log" id="chatLog" aria-live="polite">
+            <div class="empty-state" id="emptyState">
+              <h1>What's on your mind?</h1>
+            </div>
+          </div>
+
+          <div class="composer-zone">
+            <form class="composer" id="chatForm">
+              <input
+                id="messageInput"
+                name="message"
+                type="text"
+                autocomplete="off"
+                placeholder="Ask anything"
+                maxlength="1200"
+                required
+              >
+              <button class="send-button" id="sendButton" type="submit" title="Send message">
+                <span aria-hidden="true">^</span>
+                <span class="sr-only">Send message</span>
+              </button>
+            </form>
+
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="messageTemplate">
+      <article class="message">
+        <div class="message-meta">
+          <span class="speaker"></span>
+          <span class="source"></span>
+        </div>
+        <p class="bubble"></p>
+      </article>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

@@ -1,10 +1,13 @@
 [project]
 name = "learny-ai"
 version = "0.1.0"
-description = "A local-only Python chatbot that learns from a manually edited JSON file."
+description = "A Python JSON-backed Learny AI website with optional Groq learning."
 requires-python = ">=3.10"
 dependencies = []
 
+[project.scripts]
+learny = "learny.cli:main"
+learny-server = "learny.web_server:main"
+
 [tool.unittest]
 start-dir = "tests"
-

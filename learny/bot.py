@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -27,6 +28,15 @@ class AnswerGenerator(Protocol):
         history: ConversationHistory,
     ) -> GeneratedAnswer | None:
         """Generate an answer for a question Learny does not know yet."""
+
+
+@dataclass(frozen=True)
+class LearnyResponse:
+    answer: str
+    source: str
+    learned: bool = False
+    matched_question: str | None = None
+    model: str | None = None
 
 
 class Learny:
@@ -69,18 +79,31 @@ class Learny:
         )
 
     def answer(self, user_message: str) -> str:
+        return self.reply(user_message).answer
+
+    def reply(self, user_message: str) -> LearnyResponse:
         match = self.knowledge.best_match(user_message)
         if match is not None:
             answer = self.rng.choice(match.answers)
             self.history.add(user_message, answer)
-            return answer
+            return LearnyResponse(
+                answer=answer,
+                source="knowledge",
+                matched_question=match.question,
+            )
 
         generated = self._learn_answer(user_message)
         if generated is None:
-            return self.fallback
+            return LearnyResponse(answer=self.fallback, source="unknown")
 
         self.history.add(user_message, generated.answer)
-        return generated.answer
+        return LearnyResponse(
+            answer=generated.answer,
+            source="groq",
+            learned=True,
+            matched_question=generated.standalone_question,
+            model=generated.model,
+        )
 
     def _learn_answer(self, user_message: str) -> GeneratedAnswer | None:
         if self.generator is None or self.knowledge_path is None:
