@@ -276,6 +276,19 @@ input:focus-visible {
   padding-right: 2px;
 }
 
+.chat-list,
+.chat-log {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.chat-list::-webkit-scrollbar,
+.chat-log::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 .chat-item {
   position: relative;
   display: grid;
@@ -491,6 +504,10 @@ input:focus-visible {
 
 .source {
   color: var(--subtle);
+}
+
+.source:empty {
+  display: none;
 }
 
 .message.user .message-meta {

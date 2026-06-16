@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Protocol
 
 from .conversation import ConversationHistory
-from .groq_client import GeneratedAnswer
+from .groq_client import GeneratedAnswer, is_prompt_meta_answer
 from .knowledge import KnowledgeBase, load_knowledge_file
 from .memory import remember_answer
 
@@ -84,13 +84,17 @@ class Learny:
     def reply(self, user_message: str) -> LearnyResponse:
         match = self.knowledge.best_match(user_message)
         if match is not None:
-            answer = self.rng.choice(match.answers)
-            self.history.add(user_message, answer)
-            return LearnyResponse(
-                answer=answer,
-                source="knowledge",
-                matched_question=match.question,
+            answers = tuple(
+                answer for answer in match.answers if not is_prompt_meta_answer(answer)
             )
+            if answers:
+                answer = self.rng.choice(answers)
+                self.history.add(user_message, answer)
+                return LearnyResponse(
+                    answer=answer,
+                    source="knowledge",
+                    matched_question=match.question,
+                )
 
         generated = self._learn_answer(user_message)
         if generated is None:

@@ -18,6 +18,15 @@ const STATUS_CHECK_INTERVAL_MS = 15000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const DESKTOP_STAR_COUNT = 360;
 const MOBILE_STAR_COUNT = 230;
+const PROMPT_META_MARKERS = [
+  "current user question",
+  "previous conversation",
+  "recent conversation",
+  "chat context",
+  "standalone_question",
+  "system prompt",
+  "valid json",
+];
 
 let chats = loadStoredChats();
 let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
@@ -155,12 +164,23 @@ function isStoredErrorMessage(message) {
   return message.source === "error";
 }
 
+function isPromptMetaText(text) {
+  const normalized = text.toLowerCase();
+  return PROMPT_META_MARKERS.some((marker) => normalized.includes(marker));
+}
+
 function sanitizeStoredMessageText(message) {
+  if (message.speaker === "Learny" && isPromptMetaText(message.text)) {
+    return GENERIC_ERROR_MESSAGE;
+  }
   return isStoredErrorMessage(message) ? GENERIC_ERROR_MESSAGE : message.text;
 }
 
 function sanitizeStoredMessageSource(message) {
   if (isStoredErrorMessage(message)) {
+    return "";
+  }
+  if (message.speaker === "Learny") {
     return "";
   }
   return typeof message.source === "string" ? message.source : "";
@@ -178,17 +198,8 @@ function setConnection(state, label) {
   connectionPill.querySelector("strong").textContent = label;
 }
 
-function sourceLabel(source, learned, model) {
-  if (learned && model) {
-    return `learned \u00b7 ${model}`;
-  }
-  if (source === "knowledge") {
-    return "json";
-  }
-  if (source === "unknown") {
-    return "unknown";
-  }
-  return source || "local";
+function sourceLabel() {
+  return "";
 }
 
 function createChat() {
@@ -483,7 +494,7 @@ async function askLearny(message) {
     addMessage({
       speaker: "Learny",
       text: data.answer,
-      source: sourceLabel(data.source, data.learned, data.model),
+      source: sourceLabel(),
       thoughtSeconds,
     });
     await loadStatus();

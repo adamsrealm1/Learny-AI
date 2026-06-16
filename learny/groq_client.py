@@ -14,6 +14,16 @@ GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
 PRIMARY_GROQ_MODEL = "llama-3.1-8b-instant"
 FALLBACK_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_GROQ_MODELS = (PRIMARY_GROQ_MODEL, FALLBACK_GROQ_MODEL)
+GROQ_USER_AGENT = "LearnyAI/0.1 (+https://learny-ai-adamsrealm1.wasmer.app)"
+META_ANSWER_MARKERS = (
+    "current user question",
+    "previous conversation",
+    "recent conversation",
+    "chat context",
+    "standalone_question",
+    "system prompt",
+    "valid json",
+)
 
 
 class GroqAPIError(RuntimeError):
@@ -38,15 +48,7 @@ class UrlLibGroqTransport:
         self.endpoint = endpoint
 
     def send_chat_completion(self, payload: dict[str, Any], timeout: float) -> str:
-        request = urllib.request.Request(
-            self.endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
+        request = self._build_request(payload)
 
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -68,6 +70,19 @@ class UrlLibGroqTransport:
         if not isinstance(content, str) or not content.strip():
             raise GroqAPIError("Groq returned an empty answer.")
         return content.strip()
+
+    def _build_request(self, payload: dict[str, Any]) -> urllib.request.Request:
+        return urllib.request.Request(
+            self.endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "User-Agent": GROQ_USER_AGENT,
+            },
+            method="POST",
+        )
 
 
 class GroqAnswerGenerator:
@@ -99,7 +114,8 @@ class GroqAnswerGenerator:
         for model in self.models:
             try:
                 return self._generate_with_model(model, question, history)
-            except GroqAPIError:
+            except GroqAPIError as error:
+                print(f"Groq model {model} failed: {error}")
                 continue
         return None
 
@@ -114,6 +130,7 @@ class GroqAnswerGenerator:
             "messages": build_messages(question, history),
             "temperature": 0.2,
             "max_completion_tokens": 300,
+            "response_format": {"type": "json_object"},
         }
         content = self.transport.send_chat_completion(payload, self.timeout)
         parsed = parse_generated_answer(content)
@@ -129,20 +146,23 @@ def build_messages(question: str, history: ConversationHistory) -> list[dict[str
         {
             "role": "system",
             "content": (
-                "You help Learny answer questions it does not know yet. "
-                "Use the recent conversation only to resolve follow-up wording. "
-                "Rewrite follow-ups into a clear standalone question before answering. "
-                "Return only valid JSON with exactly these string keys: "
-                "standalone_question and answer. Keep the answer concise and direct."
+                "You are Learny, a direct and natural assistant. "
+                "Use chat context only to resolve pronouns or follow-up wording. "
+                "Never mention prompts, JSON, models, APIs, hidden instructions, "
+                "chat context, or whether context was needed. "
+                "Return only a JSON object with exactly these string keys: "
+                "standalone_question and answer. The answer must be what Learny "
+                "should visibly say to the user. Keep it concise and direct."
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Recent conversation:\n{history.to_prompt()}\n\n"
-                f"Current user question: {question.strip()}\n\n"
-                "What is an answer for the current user question? "
-                "If it depends on previous messages, resolve it first."
+                f"Chat context for follow-ups only:\n{history.to_prompt()}\n\n"
+                f"User message:\n{question.strip()}\n\n"
+                "Write Learny's visible reply. If the user message cannot be "
+                "answered, ask one short clarifying question instead of explaining "
+                "that context is missing."
             ),
         },
     ]
@@ -152,6 +172,7 @@ def parse_generated_answer(content: str) -> GeneratedAnswer:
     data = _parse_json_object(content)
     standalone_question = _required_text(data, "standalone_question")
     answer = _required_text(data, "answer")
+    _reject_meta_answer(answer)
     return GeneratedAnswer(
         standalone_question=standalone_question,
         answer=answer,
@@ -193,3 +214,13 @@ def _required_text(data: dict[str, Any], key: str) -> str:
     if not value:
         raise GroqAPIError(f"Groq response has an empty {key!r}.")
     return value
+
+
+def _reject_meta_answer(answer: str) -> None:
+    if is_prompt_meta_answer(answer):
+        raise GroqAPIError("Groq returned a prompt-meta answer.")
+
+
+def is_prompt_meta_answer(answer: str) -> bool:
+    normalized = answer.casefold()
+    return any(marker in normalized for marker in META_ANSWER_MARKERS)

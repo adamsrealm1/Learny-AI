@@ -4,9 +4,10 @@ version = "0.1.1"
 description = "Learny AI web app with a Python JSON brain and animated HTML/CSS/JS frontend."
 license = "MIT"
 readme = "README.md"
+wasmer-extra-flags = "--net --http-client"
 
 [dependencies]
-"wasmer/python" = "^3.12.6"
+"python/python" = "*"
 
 [fs]
 "/src" = "./src"
@@ -16,7 +17,7 @@ readme = "README.md"
 
 [[command]]
 name = "script"
-module = "wasmer/python:python"
+module = "python/python:python"
 runner = "wasi"
 
 [command.annotations.wasi]
