@@ -8,6 +8,7 @@ const chatList = document.querySelector("#chatList");
 const addChatButton = document.querySelector("#addChatButton");
 const emptyState = document.querySelector("#emptyState");
 const newChatButton = document.querySelector("#newChatButton");
+const starField = document.querySelector("#starField");
 
 const CHATS_KEY = "learny-chats";
 const ACTIVE_CHAT_KEY = "learny-active-chat-id";
@@ -15,6 +16,8 @@ const SESSION_KEY = "learny-session-id";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_CHECK_INTERVAL_MS = 15000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
+const DESKTOP_STAR_COUNT = 360;
+const MOBILE_STAR_COUNT = 230;
 
 let chats = loadStoredChats();
 let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
@@ -24,6 +27,42 @@ let isSending = false;
 function createId(prefix) {
   const randomPart = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${Date.now().toString(36)}-${randomPart}`;
+}
+
+function createStarField() {
+  if (!starField) {
+    return;
+  }
+
+  const starCount = window.innerWidth < 700 ? MOBILE_STAR_COUNT : DESKTOP_STAR_COUNT;
+  const fragment = document.createDocumentFragment();
+  starField.replaceChildren();
+
+  for (let index = 0; index < starCount; index += 1) {
+    const star = document.createElement("span");
+    const angle = Math.random() * Math.PI * 2;
+    const travel = 8 + Math.random() * 22;
+    const duration = 260 + Math.random() * 460;
+    const smallStar = Math.random() < 0.88;
+    const size = smallStar ? 0.7 + Math.random() * 0.75 : 1.45 + Math.random() * 0.85;
+    const opacity = 0.24 + Math.random() * 0.56;
+    const glow = smallStar ? 2 + Math.random() * 4 : 4 + Math.random() * 7;
+
+    star.className = "star";
+    star.style.setProperty("--x", `${Math.random() * 100}vw`);
+    star.style.setProperty("--y", `${Math.random() * 100}vh`);
+    star.style.setProperty("--travel-x", `${Math.cos(angle) * travel}vw`);
+    star.style.setProperty("--travel-y", `${Math.sin(angle) * travel}vh`);
+    star.style.setProperty("--size", `${size.toFixed(2)}px`);
+    star.style.setProperty("--opacity", opacity.toFixed(2));
+    star.style.setProperty("--glow", `${glow.toFixed(2)}px`);
+    star.style.setProperty("--glow-opacity", (opacity * 0.42).toFixed(2));
+    star.style.setProperty("--duration", `${duration.toFixed(1)}s`);
+    star.style.setProperty("--delay", `${(-Math.random() * duration).toFixed(1)}s`);
+    fragment.append(star);
+  }
+
+  starField.append(fragment);
 }
 
 function loadStoredChats() {
@@ -485,6 +524,8 @@ if (newChatButton) {
 if (addChatButton) {
   addChatButton.addEventListener("click", resetChat);
 }
+
+createStarField();
 
 if (!getActiveChat() && chats.length > 0) {
   activeChatId = sortedChats()[0].id;

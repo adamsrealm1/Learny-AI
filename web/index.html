@@ -4,10 +4,12 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI</title>
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./styles.css?v=stars">
   </head>
   <body>
     <div class="app-shell">
+      <div class="star-field" id="starField" aria-hidden="true"></div>
+
       <aside class="sidebar" aria-label="Learny navigation">
         <header class="sidebar-header">
           <strong>Learny AI</strong>
@@ -42,16 +44,6 @@
       </aside>
 
       <main class="main-area">
-        <div class="scene-bg" aria-hidden="true">
-          <div class="depth-stage">
-            <span class="liquid-blob blob-a"></span>
-            <span class="liquid-blob blob-b"></span>
-            <span class="liquid-blob blob-c"></span>
-            <span class="liquid-blob blob-d"></span>
-            <span class="liquid-blob blob-e"></span>
-          </div>
-        </div>
-
         <header class="top-bar">
           <div class="connection-pill" id="connectionPill">
             <span></span>
@@ -98,6 +90,6 @@
       </article>
     </template>
 
-    <script src="./app.js" defer></script>
+    <script src="./app.js?v=stars" defer></script>
   </body>
 </html>
