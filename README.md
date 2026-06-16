@@ -11,7 +11,7 @@ User asks in the browser
 -> If not found and GROQ_API_KEY is set, Learny calls Groq
 -> Tries llama-3.1-8b-instant first
 -> Tries openai/gpt-oss-20b if the first model fails
--> Saves learned answers into data/knowledge.json
+-> Saves learned answers into the active knowledge JSON file
 -> If both models fail, returns the unknown message
 ```
 
@@ -102,6 +102,8 @@ Then deploy from the repo root:
 ```powershell
 wasmer deploy --publish-package
 ```
+
+The deployed app uses a persistent Wasmer volume mounted at `/state`. On first boot, Learny copies the packaged `data/knowledge.json` into `/state/knowledge.json`, then learned answers are saved there. Your local `data/knowledge.json` file only changes when you run Learny locally on your own machine.
 
 For local Wasmer testing:
 

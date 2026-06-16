@@ -9,7 +9,9 @@ import urllib.request
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
+from learny import web_server
 from learny.bot import DEFAULT_FALLBACK
 from learny.groq_client import GeneratedAnswer, PRIMARY_GROQ_MODEL
 from learny.messages import GENERIC_ERROR_MESSAGE
@@ -82,6 +84,25 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(api_error["error"], GENERIC_ERROR_MESSAGE)
         self.assertEqual(missing_status, HTTPStatus.NOT_FOUND)
         self.assertEqual(missing_text, GENERIC_ERROR_MESSAGE)
+
+    def test_missing_persistent_knowledge_file_is_seeded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed_path = root / "packaged-knowledge.json"
+            seed_path.write_text(
+                json.dumps({"questions": {"hello": "Hello from seed."}}),
+                encoding="utf-8",
+            )
+            knowledge_path = root / "state" / "knowledge.json"
+
+            with patch.object(web_server, "PACKAGE_KNOWLEDGE_PATH", seed_path):
+                with patch.object(web_server, "DEFAULT_KNOWLEDGE_PATH", root / "missing.json"):
+                    web_server._ensure_knowledge_file(knowledge_path)
+
+            self.assertEqual(
+                json.loads(knowledge_path.read_text(encoding="utf-8")),
+                {"questions": {"hello": "Hello from seed."}},
+            )
 
 
 class running_test_server:
