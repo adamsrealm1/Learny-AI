@@ -28,9 +28,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WASMER_ROOT = Path("/")
 WASMER_STATE_DIR = WASMER_ROOT / "state"
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
-DEFAULT_KNOWLEDGE_PATH = PROJECT_ROOT / "data" / "knowledge.json"
-PACKAGE_KNOWLEDGE_PATH = WASMER_ROOT / "data" / "knowledge.json"
+LOCAL_STATE_DIR = PROJECT_ROOT / ".learny-state"
+LOCAL_KNOWLEDGE_PATH = LOCAL_STATE_DIR / "knowledge.json"
 WASMER_STATE_KNOWLEDGE_PATH = WASMER_STATE_DIR / "knowledge.json"
+KNOWLEDGE_PATH_ENV = "LEARNY_KNOWLEDGE_PATH"
 
 
 @dataclass(frozen=True)
@@ -294,11 +295,12 @@ def _default_static_dir() -> Path:
 
 
 def _default_knowledge_path() -> Path:
+    env_path = os.environ.get(KNOWLEDGE_PATH_ENV, "").strip()
+    if env_path:
+        return Path(env_path)
     if WASMER_STATE_DIR.exists():
         return WASMER_STATE_KNOWLEDGE_PATH
-    if PACKAGE_KNOWLEDGE_PATH.exists():
-        return PACKAGE_KNOWLEDGE_PATH
-    return DEFAULT_KNOWLEDGE_PATH
+    return LOCAL_KNOWLEDGE_PATH
 
 
 def _ensure_knowledge_file(knowledge_path: Path) -> None:
@@ -306,19 +308,7 @@ def _ensure_knowledge_file(knowledge_path: Path) -> None:
         return
 
     knowledge_path.parent.mkdir(parents=True, exist_ok=True)
-    seed_path = _knowledge_seed_path(knowledge_path)
-    if seed_path is not None:
-        knowledge_path.write_text(seed_path.read_text(encoding="utf-8"), encoding="utf-8")
-        return
-
     knowledge_path.write_text('{"questions": {}}\n', encoding="utf-8")
-
-
-def _knowledge_seed_path(knowledge_path: Path) -> Path | None:
-    for seed_path in (PACKAGE_KNOWLEDGE_PATH, DEFAULT_KNOWLEDGE_PATH):
-        if seed_path.exists() and seed_path.resolve() != knowledge_path:
-            return seed_path
-    return None
 
 
 def _safe_static_path(static_dir: Path, route: str) -> Path:

@@ -11,9 +11,7 @@ from .knowledge import KnowledgeBase, load_knowledge_file
 from .memory import remember_answer
 
 
-DEFAULT_FALLBACK = (
-    "I do not know that yet. Add it to data/knowledge.json and ask again."
-)
+DEFAULT_FALLBACK = "I do not know that yet."
 
 
 class RandomChooser(Protocol):
@@ -82,31 +80,55 @@ class Learny:
         return self.reply(user_message).answer
 
     def reply(self, user_message: str) -> LearnyResponse:
-        match = self.knowledge.best_match(user_message)
-        if match is not None:
-            answers = tuple(
-                answer for answer in match.answers if not is_prompt_meta_answer(answer)
-            )
-            if answers:
-                answer = self.rng.choice(answers)
-                self.history.add(user_message, answer)
-                return LearnyResponse(
-                    answer=answer,
-                    source="knowledge",
-                    matched_question=match.question,
-                )
+        known_response = self._reply_from_knowledge(user_message)
+        if known_response is not None:
+            self.history.add(user_message, known_response.answer)
+            return known_response
 
         generated = self._learn_answer(user_message)
         if generated is None:
             return LearnyResponse(answer=self.fallback, source="unknown")
 
-        self.history.add(user_message, generated.answer)
-        return LearnyResponse(
-            answer=generated.answer,
-            source="groq",
+        learned_response = self._reply_from_knowledge(
+            generated.standalone_question,
             learned=True,
-            matched_question=generated.standalone_question,
             model=generated.model,
+        )
+        if learned_response is None:
+            learned_response = LearnyResponse(
+                answer=generated.answer,
+                source="knowledge",
+                learned=True,
+                matched_question=generated.standalone_question,
+                model=generated.model,
+            )
+
+        self.history.add(user_message, learned_response.answer)
+        return learned_response
+
+    def _reply_from_knowledge(
+        self,
+        user_message: str,
+        *,
+        learned: bool = False,
+        model: str | None = None,
+    ) -> LearnyResponse | None:
+        match = self.knowledge.best_match(user_message)
+        if match is None:
+            return None
+
+        answers = tuple(
+            answer for answer in match.answers if not is_prompt_meta_answer(answer)
+        )
+        if not answers:
+            return None
+
+        return LearnyResponse(
+            answer=self.rng.choice(answers),
+            source="knowledge",
+            learned=learned,
+            matched_question=match.question,
+            model=model,
         )
 
     def _learn_answer(self, user_message: str) -> GeneratedAnswer | None:

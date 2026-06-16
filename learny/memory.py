@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -8,23 +10,27 @@ from .knowledge import KnowledgeBase, KnowledgeFormatError, load_knowledge_file
 from .text import tokenize
 
 
+_MEMORY_LOCK = threading.RLock()
+
+
 def remember_answer(path: str | Path, question: str, answer: str) -> KnowledgeBase:
     knowledge_path = Path(path)
     question = _required_text(question, "question")
     answer = _required_text(answer, "answer")
 
-    raw_data = _load_raw_knowledge(knowledge_path)
-    raw_questions = raw_data.setdefault("questions", {})
+    with _MEMORY_LOCK:
+        raw_data = _load_raw_knowledge(knowledge_path)
+        raw_questions = raw_data.setdefault("questions", {})
 
-    if isinstance(raw_questions, dict):
-        _remember_in_mapping(raw_questions, question, answer)
-    elif isinstance(raw_questions, list):
-        _remember_in_list(raw_questions, question, answer)
-    else:
-        raise KnowledgeFormatError("'questions' must be an object or a list.")
+        if isinstance(raw_questions, dict):
+            _remember_in_mapping(raw_questions, question, answer)
+        elif isinstance(raw_questions, list):
+            _remember_in_list(raw_questions, question, answer)
+        else:
+            raise KnowledgeFormatError("'questions' must be an object or a list.")
 
-    _write_raw_knowledge(knowledge_path, raw_data)
-    return load_knowledge_file(knowledge_path)
+        _write_raw_knowledge(knowledge_path, raw_data)
+        return load_knowledge_file(knowledge_path)
 
 
 def _load_raw_knowledge(path: Path) -> dict[str, Any]:
@@ -106,11 +112,15 @@ def _with_answer(raw_answers: Any, answer: str) -> list[str]:
 
 
 def _write_raw_knowledge(path: Path, raw_data: dict[str, Any]) -> None:
-    temporary_path = path.with_name(f"{path.name}.tmp")
-    with temporary_path.open("w", encoding="utf-8") as file:
-        json.dump(raw_data, file, indent=2)
-        file.write("\n")
-    temporary_path.replace(path)
+    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary_path.open("w", encoding="utf-8") as file:
+            json.dump(raw_data, file, indent=2)
+            file.write("\n")
+        temporary_path.replace(path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
 
 def _required_text(value: str, label: str) -> str:

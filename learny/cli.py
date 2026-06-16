@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 from pathlib import Path
 
@@ -11,7 +12,10 @@ from .messages import GENERIC_ERROR_MESSAGE
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_KNOWLEDGE_PATH = PROJECT_ROOT / "data" / "knowledge.json"
+LOCAL_STATE_DIR = PROJECT_ROOT / ".learny-state"
+DEFAULT_KNOWLEDGE_PATH = Path(
+    os.environ.get("LEARNY_KNOWLEDGE_PATH") or LOCAL_STATE_DIR / "knowledge.json"
+)
 EXIT_WORDS = {"exit", "quit", "q"}
 
 
@@ -45,9 +49,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def create_bot(knowledge_path: Path, seed: int | None, offline: bool) -> Learny:
+    ensure_knowledge_file(knowledge_path)
     rng = random.Random(seed) if seed is not None else None
     generator = None if offline else GroqAnswerGenerator.from_env()
     return Learny.from_file(knowledge_path, generator=generator, rng=rng)
+
+
+def ensure_knowledge_file(knowledge_path: Path) -> None:
+    if knowledge_path.exists():
+        return
+    knowledge_path.parent.mkdir(parents=True, exist_ok=True)
+    knowledge_path.write_text('{"questions": {}}\n', encoding="utf-8")
 
 
 def run_chat(bot: Learny, knowledge_path: Path) -> None:

@@ -13,7 +13,6 @@ wasmer-extra-flags = "--net --http-client"
 "/src" = "./src"
 "/learny" = "./learny"
 "/web" = "./web"
-"/data" = "./data"
 
 [[command]]
 name = "script"

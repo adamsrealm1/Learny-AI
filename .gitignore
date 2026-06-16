@@ -9,4 +9,4 @@ htmlcov/
 venv/
 env/
 .env
-
+.learny-state/
