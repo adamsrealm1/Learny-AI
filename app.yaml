@@ -4,9 +4,9 @@ owner: adamsrealm1
 package: .
 env:
   PYTHONEXECUTABLE: /bin/python
+cli_args:
+- /src/main.py
 volumes:
 - name: knowledge
   mount: /state
-cli_args:
-- /src/main.py
 kind: wasmer.io/App.v0
