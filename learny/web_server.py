@@ -21,6 +21,7 @@ from .groq_client import (
     GroqAnswerGenerator,
 )
 from .knowledge import KnowledgeFormatError, load_knowledge_file
+from .messages import GENERIC_ERROR_MESSAGE
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -74,7 +75,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if route == "/api/ask":
                 self._handle_ask()
                 return
-            self._send_json({"error": "Not found."}, HTTPStatus.NOT_FOUND)
+            self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.NOT_FOUND)
 
         def log_message(self, format: str, *args: Any) -> None:
             print(f"{self.address_string()} - {format % args}")
@@ -84,11 +85,11 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 knowledge = load_knowledge_file(config.knowledge_path)
                 knowledge_ok = True
                 knowledge_count = len(knowledge.entries)
-                knowledge_error = None
-            except (FileNotFoundError, KnowledgeFormatError) as error:
+                knowledge_error = False
+            except (FileNotFoundError, KnowledgeFormatError):
                 knowledge_ok = False
                 knowledge_count = 0
-                knowledge_error = str(error)
+                knowledge_error = True
 
             self._send_json(
                 {
@@ -101,16 +102,16 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "fallbackModel": FALLBACK_GROQ_MODEL,
                     "models": list(DEFAULT_GROQ_MODELS),
                     "unknownMessage": DEFAULT_FALLBACK,
-                    "error": knowledge_error,
+                    "error": GENERIC_ERROR_MESSAGE if knowledge_error else None,
                 }
             )
 
         def _handle_knowledge(self) -> None:
             try:
                 knowledge = load_knowledge_file(config.knowledge_path)
-            except (FileNotFoundError, KnowledgeFormatError) as error:
+            except (FileNotFoundError, KnowledgeFormatError):
                 self._send_json(
-                    {"questions": [], "count": 0, "error": str(error)},
+                    {"questions": [], "count": 0, "error": GENERIC_ERROR_MESSAGE},
                     HTTPStatus.INTERNAL_SERVER_ERROR,
                 )
                 return
@@ -132,8 +133,8 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             try:
                 body = self._read_json_body()
                 message = _required_string(body, "message")
-            except ValueError as error:
-                self._send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+            except ValueError:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
 
             session_id, history = session_store.get(
@@ -146,9 +147,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     generator=config.generator_factory(),
                     history=history,
                 )
-            except (FileNotFoundError, KnowledgeFormatError) as error:
+            except (FileNotFoundError, KnowledgeFormatError):
                 self._send_json(
-                    {"error": str(error)},
+                    {"error": GENERIC_ERROR_MESSAGE},
                     HTTPStatus.INTERNAL_SERVER_ERROR,
                 )
                 return
@@ -172,11 +173,11 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             try:
                 static_path = _safe_static_path(config.static_dir, route)
             except ValueError:
-                self._send_text("Not found.", HTTPStatus.NOT_FOUND)
+                self._send_text(GENERIC_ERROR_MESSAGE, HTTPStatus.NOT_FOUND)
                 return
 
             if not static_path.is_file():
-                self._send_text("Not found.", HTTPStatus.NOT_FOUND)
+                self._send_text(GENERIC_ERROR_MESSAGE, HTTPStatus.NOT_FOUND)
                 return
 
             content_type = mimetypes.guess_type(static_path.name)[0]

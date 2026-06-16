@@ -14,7 +14,7 @@ const ACTIVE_CHAT_KEY = "learny-active-chat-id";
 const SESSION_KEY = "learny-session-id";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_CHECK_INTERVAL_MS = 15000;
-const SERVER_HINT = "Run wasmer run . --net --env PORT=8000, then open http://127.0.0.1:8000.";
+const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 
 let chats = loadStoredChats();
 let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
@@ -53,8 +53,8 @@ function loadStoredChats() {
               )
               .map((message) => ({
                 speaker: message.speaker,
-                text: message.text,
-                source: typeof message.source === "string" ? message.source : "",
+                text: sanitizeStoredMessageText(message),
+                source: sanitizeStoredMessageSource(message),
                 thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
               }))
           : [],
@@ -110,6 +110,21 @@ function formatThoughtSeconds(value) {
     return "0";
   }
   return Number.isInteger(seconds) ? String(seconds) : seconds.toFixed(1);
+}
+
+function isStoredErrorMessage(message) {
+  return message.source === "error";
+}
+
+function sanitizeStoredMessageText(message) {
+  return isStoredErrorMessage(message) ? GENERIC_ERROR_MESSAGE : message.text;
+}
+
+function sanitizeStoredMessageSource(message) {
+  if (isStoredErrorMessage(message)) {
+    return "";
+  }
+  return typeof message.source === "string" ? message.source : "";
 }
 
 function setEmptyState(visible) {
@@ -324,8 +339,8 @@ function resetChat() {
     addMessage(
       {
         speaker: "Learny",
-        text: `The interface is loaded, but the Wasmer-hosted API is not connected. ${SERVER_HINT}`,
-        source: "servers offline",
+        text: GENERIC_ERROR_MESSAGE,
+        source: "",
       },
       { persist: false },
     );
@@ -359,7 +374,7 @@ function addTyping() {
 
 async function apiFetch(path, options = {}) {
   if (DIRECT_FILE_MODE) {
-    throw new Error(SERVER_HINT);
+    throw new Error(GENERIC_ERROR_MESSAGE);
   }
 
   const response = await fetch(path, {
@@ -371,9 +386,15 @@ async function apiFetch(path, options = {}) {
     ...options,
   });
 
-  const data = await response.json();
+  let data = {};
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
   if (!response.ok) {
-    throw new Error(data.error || "Request failed.");
+    throw new Error(GENERIC_ERROR_MESSAGE);
   }
   return data;
 }
@@ -431,8 +452,8 @@ async function askLearny(message) {
     typing.remove();
     addMessage({
       speaker: "Learny",
-      text: error.message,
-      source: "error",
+      text: GENERIC_ERROR_MESSAGE,
+      source: "",
     });
     setConnection("offline", "Servers offline");
   } finally {
@@ -485,8 +506,8 @@ if (DIRECT_FILE_MODE) {
   addMessage(
     {
       speaker: "Learny",
-      text: `The interface is loaded, but the Wasmer-hosted API is not connected. ${SERVER_HINT}`,
-      source: "servers offline",
+      text: GENERIC_ERROR_MESSAGE,
+      source: "",
     },
     { persist: false },
   );

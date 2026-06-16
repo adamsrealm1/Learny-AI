@@ -6,11 +6,13 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from http import HTTPStatus
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from learny.bot import DEFAULT_FALLBACK
 from learny.groq_client import GeneratedAnswer, PRIMARY_GROQ_MODEL
+from learny.messages import GENERIC_ERROR_MESSAGE
 from learny.web_server import WebServerConfig, create_handler
 
 
@@ -68,6 +70,19 @@ class WebServerTests(unittest.TestCase):
         self.assertEqual(knowledge["count"], 1)
         self.assertEqual(knowledge["questions"][0]["question"], "what is web learny")
 
+    def test_visible_errors_use_generic_message(self) -> None:
+        with running_test_server({"questions": {"hello": "Hello from JSON."}}) as base_url:
+            status, api_error = request_json_with_status(
+                f"{base_url}/api/ask",
+                {"message": ""},
+            )
+            missing_status, missing_text = request_text_with_status(f"{base_url}/missing")
+
+        self.assertEqual(status, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(api_error["error"], GENERIC_ERROR_MESSAGE)
+        self.assertEqual(missing_status, HTTPStatus.NOT_FOUND)
+        self.assertEqual(missing_text, GENERIC_ERROR_MESSAGE)
+
 
 class running_test_server:
     def __init__(self, knowledge, generator_factory=lambda: None):
@@ -109,6 +124,13 @@ class running_test_server:
 
 
 def request_json(url: str, payload: dict | None = None) -> dict:
+    status, body = request_json_with_status(url, payload)
+    if status >= 400:
+        raise AssertionError(f"HTTP {status}: {json.dumps(body)}")
+    return body
+
+
+def request_json_with_status(url: str, payload: dict | None = None) -> tuple[int, dict]:
     data = None
     headers = {}
     if payload is not None:
@@ -118,10 +140,25 @@ def request_json(url: str, payload: dict | None = None) -> dict:
     request = urllib.request.Request(url, data=data, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return response.status, json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
-        body = error.read().decode("utf-8")
-        raise AssertionError(f"HTTP {error.code}: {body}") from error
+        try:
+            body = error.read().decode("utf-8")
+            return error.code, json.loads(body)
+        finally:
+            error.close()
+
+
+def request_text_with_status(url: str) -> tuple[int, str]:
+    request = urllib.request.Request(url)
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return response.status, response.read().decode("utf-8")
+    except urllib.error.HTTPError as error:
+        try:
+            return error.code, error.read().decode("utf-8")
+        finally:
+            error.close()
 
 
 if __name__ == "__main__":

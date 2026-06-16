@@ -1,10 +1,10 @@
 :root {
   color-scheme: dark;
   --bg: #000;
-  --sidebar: #060606;
-  --sidebar-border: #171717;
-  --hover: #1f1f1f;
-  --active: #303030;
+  --sidebar: rgba(8, 8, 12, 0.38);
+  --sidebar-border: rgba(255, 255, 255, 0.12);
+  --hover: rgba(255, 255, 255, 0.1);
+  --active: rgba(255, 255, 255, 0.16);
   --composer: #2b2b2b;
   --composer-border: #3a3a3a;
   --text: #f4f4f4;
@@ -69,6 +69,7 @@ input:focus-visible {
 }
 
 .app-shell {
+  position: relative;
   display: grid;
   grid-template-columns: 244px minmax(0, 1fr);
   width: 100vw;
@@ -80,9 +81,28 @@ input:focus-visible {
   min-height: 0;
   overflow: hidden;
   background: var(--bg);
+  isolation: isolate;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: -18%;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 8% 12%, rgba(82, 28, 140, 0.58), transparent 26%),
+    radial-gradient(circle at 21% 48%, rgba(14, 83, 116, 0.44), transparent 31%),
+    radial-gradient(circle at 4% 89%, rgba(118, 36, 76, 0.38), transparent 27%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08), transparent 34%, rgba(255, 255, 255, 0.03));
+  filter: blur(38px) saturate(1.35);
+  opacity: 0.72;
+  pointer-events: none;
+  transform: translate3d(0, 0, 0);
 }
 
 .sidebar {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 10px;
@@ -90,7 +110,37 @@ input:focus-visible {
   min-height: 0;
   padding: 10px 8px;
   border-right: 1px solid var(--sidebar-border);
-  background: var(--sidebar);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025)),
+    var(--sidebar);
+  box-shadow:
+    inset -1px 0 rgba(255, 255, 255, 0.07),
+    inset 0 1px rgba(255, 255, 255, 0.08),
+    18px 0 60px rgba(0, 0, 0, 0.38);
+  overflow: hidden;
+  backdrop-filter: blur(34px) saturate(1.45);
+  -webkit-backdrop-filter: blur(34px) saturate(1.45);
+}
+
+.sidebar::before {
+  content: "";
+  position: absolute;
+  inset: -40% -26%;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.16), transparent 0 12%, transparent 34%),
+    radial-gradient(circle at 72% 28%, rgba(74, 32, 140, 0.34), transparent 0 38%),
+    radial-gradient(circle at 18% 72%, rgba(11, 90, 124, 0.32), transparent 0 42%),
+    radial-gradient(circle at 84% 92%, rgba(128, 36, 82, 0.26), transparent 0 34%);
+  filter: blur(30px);
+  opacity: 0.78;
+  pointer-events: none;
+  transform: translate3d(0, 0, 0);
+}
+
+.sidebar > * {
+  position: relative;
+  z-index: 1;
 }
 
 .sidebar-header {
@@ -222,7 +272,7 @@ input:focus-visible {
 
 .chat-item:hover,
 .chat-item.active {
-  background: #121212;
+  background: rgba(255, 255, 255, 0.09);
 }
 
 .chat-open-button {
@@ -285,6 +335,7 @@ input:focus-visible {
 
 .main-area {
   position: relative;
+  z-index: 1;
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr);
   min-width: 0;

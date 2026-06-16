@@ -7,6 +7,7 @@ from pathlib import Path
 from .bot import Learny
 from .groq_client import GroqAnswerGenerator
 from .knowledge import KnowledgeFormatError
+from .messages import GENERIC_ERROR_MESSAGE
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -79,10 +80,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         bot = create_bot(knowledge_path, args.seed, args.offline)
     except FileNotFoundError:
-        print(f"Knowledge file was not found: {knowledge_path}")
+        print(GENERIC_ERROR_MESSAGE)
         return 1
-    except KnowledgeFormatError as error:
-        print(f"Knowledge file problem: {error}")
+    except KnowledgeFormatError:
+        print(GENERIC_ERROR_MESSAGE)
         return 1
 
     if args.once is not None:
