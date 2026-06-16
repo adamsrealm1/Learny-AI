@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Protocol
 
 from .conversation import ConversationHistory
-from .groq_client import GeneratedAnswer, is_prompt_meta_answer
+from .groq_client import (
+    GeneratedAnswer,
+    is_prompt_meta_answer,
+    is_unusable_generated_answer,
+)
 from .knowledge import KnowledgeBase, load_knowledge_file
 from .memory import remember_answer
 
@@ -137,6 +141,11 @@ class Learny:
 
         generated = self.generator.generate(user_message, self.history)
         if generated is None:
+            return None
+        if is_unusable_generated_answer(
+            generated.standalone_question,
+            generated.answer,
+        ):
             return None
 
         self.knowledge = remember_answer(

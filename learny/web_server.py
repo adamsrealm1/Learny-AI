@@ -5,6 +5,7 @@ import json
 import mimetypes
 import os
 import secrets
+import uuid
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +20,7 @@ from .groq_client import (
     FALLBACK_GROQ_MODEL,
     PRIMARY_GROQ_MODEL,
     GroqAnswerGenerator,
+    is_unusable_generated_answer,
 )
 from .knowledge import KnowledgeFormatError, load_knowledge_file
 from .messages import GENERIC_ERROR_MESSAGE
@@ -276,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     knowledge_path = args.knowledge.resolve()
     _ensure_knowledge_file(knowledge_path)
+    _repair_knowledge_file(knowledge_path)
     generator_factory = (
         (lambda: None) if args.offline else GroqAnswerGenerator.from_env
     )
@@ -309,6 +312,89 @@ def _ensure_knowledge_file(knowledge_path: Path) -> None:
 
     knowledge_path.parent.mkdir(parents=True, exist_ok=True)
     knowledge_path.write_text('{"questions": {}}\n', encoding="utf-8")
+
+
+def _repair_knowledge_file(knowledge_path: Path) -> None:
+    try:
+        raw_data = json.loads(knowledge_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(raw_data, dict):
+        return
+
+    raw_questions = raw_data.get("questions")
+    if isinstance(raw_questions, dict):
+        changed = _repair_question_mapping(raw_questions)
+    elif isinstance(raw_questions, list):
+        changed = _repair_question_list(raw_questions)
+    else:
+        return
+
+    if changed:
+        _write_json_file(knowledge_path, raw_data)
+
+
+def _repair_question_mapping(raw_questions: dict[Any, Any]) -> bool:
+    changed = False
+    for question, raw_answers in list(raw_questions.items()):
+        if not isinstance(question, str):
+            continue
+        repaired_answers = _repaired_answers(question, raw_answers)
+        if repaired_answers is None:
+            continue
+        if not repaired_answers:
+            del raw_questions[question]
+            changed = True
+        elif repaired_answers != raw_answers:
+            raw_questions[question] = repaired_answers
+            changed = True
+    return changed
+
+
+def _repair_question_list(raw_questions: list[Any]) -> bool:
+    changed = False
+    for entry in list(raw_questions):
+        if not isinstance(entry, dict):
+            continue
+        question = entry.get("question")
+        if not isinstance(question, str):
+            continue
+        repaired_answers = _repaired_answers(question, entry.get("answers"))
+        if repaired_answers is None:
+            continue
+        if not repaired_answers:
+            raw_questions.remove(entry)
+            changed = True
+        elif repaired_answers != entry.get("answers"):
+            entry["answers"] = repaired_answers
+            changed = True
+    return changed
+
+
+def _repaired_answers(question: str, raw_answers: Any) -> list[str] | None:
+    if isinstance(raw_answers, str):
+        answers = [raw_answers]
+    elif isinstance(raw_answers, list):
+        answers = [answer for answer in raw_answers if isinstance(answer, str)]
+    else:
+        return None
+    return [
+        answer
+        for answer in answers
+        if not is_unusable_generated_answer(question, answer)
+    ]
+
+
+def _write_json_file(path: Path, raw_data: dict[str, Any]) -> None:
+    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with temporary_path.open("w", encoding="utf-8") as file:
+            json.dump(raw_data, file, indent=2)
+            file.write("\n")
+        temporary_path.replace(path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
 
 
 def _safe_static_path(static_dir: Path, route: str) -> Path:

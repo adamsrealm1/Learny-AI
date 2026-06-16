@@ -503,10 +503,6 @@ input:focus-visible {
 }
 
 .source {
-  color: var(--subtle);
-}
-
-.source:empty {
   display: none;
 }
 

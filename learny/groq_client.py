@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -23,6 +24,22 @@ META_ANSWER_MARKERS = (
     "standalone_question",
     "system prompt",
     "valid json",
+)
+CLARIFYING_ANSWER_PATTERNS = (
+    "can you clarify",
+    "could you clarify",
+    "please clarify",
+    "what do you mean",
+    "what would you like",
+    "what do you want",
+    "what kind of",
+    "what type of",
+    "which kind of",
+    "which type of",
+    "tell me more",
+    "i need more information",
+    "i need a little more",
+    "i need some more",
 )
 
 
@@ -125,23 +142,47 @@ class GroqAnswerGenerator:
         question: str,
         history: ConversationHistory,
     ) -> GeneratedAnswer:
-        payload = {
-            "model": model,
-            "messages": build_messages(question, history),
-            "temperature": 0.2,
-            "max_completion_tokens": 300,
-            "response_format": {"type": "json_object"},
-        }
-        content = self.transport.send_chat_completion(payload, self.timeout)
-        parsed = parse_generated_answer(content)
-        return GeneratedAnswer(
-            standalone_question=parsed.standalone_question,
-            answer=parsed.answer,
-            model=model,
+        last_error: GroqAPIError | None = None
+        for force_direct in (False, True):
+            payload = {
+                "model": model,
+                "messages": build_messages(question, history, force_direct=force_direct),
+                "temperature": 0.2,
+                "max_completion_tokens": 300,
+                "response_format": {"type": "json_object"},
+            }
+            content = self.transport.send_chat_completion(payload, self.timeout)
+            try:
+                parsed = parse_generated_answer(content)
+            except GroqAPIError as error:
+                last_error = error
+                if "unusable answer" in str(error) and not force_direct:
+                    continue
+                raise
+            return GeneratedAnswer(
+                standalone_question=parsed.standalone_question,
+                answer=parsed.answer,
+                model=model,
+            )
+        raise last_error or GroqAPIError("Groq returned an unusable answer.")
+
+
+def build_messages(
+    question: str,
+    history: ConversationHistory,
+    *,
+    force_direct: bool = False,
+) -> list[dict[str, str]]:
+    direct_instruction = ""
+    if force_direct:
+        direct_instruction = (
+            "\n\nYour previous style was too much like a clarification. This time, "
+            "answer directly even if the user is vague. Never return an answer "
+            "that is only a question. Example: if the user says 'im bored', answer "
+            "with a few concrete things they can do. If the user says 'games' "
+            "after boredom was discussed, suggest specific games."
         )
 
-
-def build_messages(question: str, history: ConversationHistory) -> list[dict[str, str]]:
     return [
         {
             "role": "system",
@@ -152,7 +193,10 @@ def build_messages(question: str, history: ConversationHistory) -> list[dict[str
                 "chat context, or whether context was needed. "
                 "Return only a JSON object with exactly these string keys: "
                 "standalone_question and answer. The answer must be what Learny "
-                "should visibly say to the user. Keep it concise and direct."
+                "should visibly say to the user. Keep it concise and direct. "
+                "Do not ask clarifying questions. If the message is vague, give "
+                "a useful general answer with a few practical options."
+                f"{direct_instruction}"
             ),
         },
         {
@@ -160,9 +204,9 @@ def build_messages(question: str, history: ConversationHistory) -> list[dict[str
             "content": (
                 f"Chat context for follow-ups only:\n{history.to_prompt()}\n\n"
                 f"User message:\n{question.strip()}\n\n"
-                "Write Learny's visible reply. If the user message cannot be "
-                "answered, ask one short clarifying question instead of explaining "
-                "that context is missing."
+                "Write Learny's visible reply as an answer, not another question. "
+                "For short follow-ups, use the chat context to answer the likely "
+                "meaning directly."
             ),
         },
     ]
@@ -172,7 +216,7 @@ def parse_generated_answer(content: str) -> GeneratedAnswer:
     data = _parse_json_object(content)
     standalone_question = _required_text(data, "standalone_question")
     answer = _required_text(data, "answer")
-    _reject_meta_answer(answer)
+    _reject_unusable_answer(standalone_question, answer)
     return GeneratedAnswer(
         standalone_question=standalone_question,
         answer=answer,
@@ -216,11 +260,27 @@ def _required_text(data: dict[str, Any], key: str) -> str:
     return value
 
 
-def _reject_meta_answer(answer: str) -> None:
+def _reject_unusable_answer(question: str, answer: str) -> None:
     if is_prompt_meta_answer(answer):
         raise GroqAPIError("Groq returned a prompt-meta answer.")
+    if is_unusable_generated_answer(question, answer):
+        raise GroqAPIError("Groq returned an unusable answer.")
 
 
 def is_prompt_meta_answer(answer: str) -> bool:
     normalized = answer.casefold()
     return any(marker in normalized for marker in META_ANSWER_MARKERS)
+
+
+def is_unusable_generated_answer(question: str, answer: str) -> bool:
+    normalized_question = _normalize_for_comparison(question)
+    normalized_answer = _normalize_for_comparison(answer)
+    if normalized_question and normalized_question == normalized_answer:
+        return True
+
+    lowered_answer = answer.strip().casefold()
+    return any(pattern in lowered_answer for pattern in CLARIFYING_ANSWER_PATTERNS)
+
+
+def _normalize_for_comparison(text: str) -> str:
+    return " ".join(re.findall(r"[a-z0-9]+", text.casefold()))
