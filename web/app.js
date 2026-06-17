@@ -16,7 +16,10 @@ const ACTIVE_CHAT_KEY = "learny-active-chat-id";
 const SESSION_KEY = "learny-session-id";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_CHECK_INTERVAL_MS = 15000;
+const ASK_RETRY_BASE_DELAY_MS = 1200;
+const ASK_RETRY_MAX_DELAY_MS = 12000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
+const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
 const API_BASE_CANDIDATES = [
   "",
   "https://learny-ai-adamsrealm1.wasmer.app",
@@ -478,6 +481,32 @@ function isApiResponseData(data) {
   return "app" in data || "answer" in data || "questions" in data || "error" in data;
 }
 
+function sleep(milliseconds) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, milliseconds);
+  });
+}
+
+function askRetryDelay(attempt) {
+  const exponentialDelay = ASK_RETRY_BASE_DELAY_MS * 2 ** Math.min(attempt, 4);
+  return Math.min(exponentialDelay, ASK_RETRY_MAX_DELAY_MS);
+}
+
+function isUsableAskResponse(data) {
+  if (!data || typeof data !== "object" || data.error) {
+    return false;
+  }
+  if (data.source === "unknown") {
+    return false;
+  }
+  return (
+    typeof data.answer === "string" &&
+    data.answer.trim() &&
+    data.answer.trim() !== GENERIC_ERROR_MESSAGE &&
+    data.answer.trim() !== UNKNOWN_ANSWER_MESSAGE
+  );
+}
+
 async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
   if (DIRECT_FILE_MODE) {
     throw new Error(GENERIC_ERROR_MESSAGE);
@@ -536,6 +565,10 @@ async function loadStatus() {
     const status = await apiFetch("/api/status", {}, API_BASE_CANDIDATES);
     setConnection(status.ok ? "online" : "offline", status.ok ? "Servers online" : "Servers offline");
   } catch (error) {
+    if (isSending) {
+      setConnection("checking", "Checking server status...");
+      return;
+    }
     setConnection("offline", "Servers offline");
   }
 }
@@ -555,38 +588,42 @@ async function askLearny(message) {
   sendButton.disabled = true;
   messageInput.disabled = true;
 
-  try {
-    const data = await apiFetch("/api/ask", {
-      method: "POST",
-      body: JSON.stringify({ message, sessionId }),
-    }, activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES);
-    sessionId = data.sessionId;
-    chat.sessionId = data.sessionId;
-    localStorage.setItem(SESSION_KEY, sessionId);
-    saveChats();
-    typing.remove();
-    const thoughtSeconds = (performance.now() - thoughtStartedAt) / 1000;
-    addMessage({
-      speaker: "Learny",
-      text: data.answer,
-      source: sourceLabel(),
-      thoughtSeconds,
-    });
-    await loadStatus();
-  } catch (error) {
-    typing.remove();
-    addMessage({
-      speaker: "Learny",
-      text: GENERIC_ERROR_MESSAGE,
-      source: "",
-    });
-    setConnection("offline", "Servers offline");
-  } finally {
-    isSending = false;
-    sendButton.disabled = false;
-    messageInput.disabled = false;
-    messageInput.focus();
+  let attempt = 0;
+  while (true) {
+    try {
+      const data = await apiFetch("/api/ask", {
+        method: "POST",
+        body: JSON.stringify({ message, sessionId }),
+      }, activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES);
+      if (!isUsableAskResponse(data)) {
+        throw new Error(GENERIC_ERROR_MESSAGE);
+      }
+
+      sessionId = data.sessionId;
+      chat.sessionId = data.sessionId;
+      localStorage.setItem(SESSION_KEY, sessionId);
+      saveChats();
+      typing.remove();
+      const thoughtSeconds = (performance.now() - thoughtStartedAt) / 1000;
+      addMessage({
+        speaker: "Learny",
+        text: data.answer,
+        source: sourceLabel(),
+        thoughtSeconds,
+      });
+      await loadStatus();
+      break;
+    } catch (error) {
+      setConnection("checking", "Checking server status...");
+      await sleep(askRetryDelay(attempt));
+      attempt += 1;
+    }
   }
+
+  isSending = false;
+  sendButton.disabled = false;
+  messageInput.disabled = false;
+  messageInput.focus();
 }
 
 chatForm.addEventListener("submit", (event) => {
