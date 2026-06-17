@@ -327,9 +327,18 @@ function displayMessage({ speaker, text, source = "", thoughtSeconds = null }) {
   node.querySelector(".speaker").textContent = speaker;
   node.querySelector(".source").textContent = source === "error" ? "" : source;
   const bubble = node.querySelector(".bubble");
-  const textNode = document.createElement("span");
-  textNode.className = "bubble-text";
-  textNode.textContent = text;
+  const textNode = document.createElement("div");
+  textNode.className = "bubble-text markdown-body";
+  textNode.innerHTML =
+    window.LearnyMarkdown && typeof window.LearnyMarkdown.renderMarkdown === "function"
+      ? window.LearnyMarkdown.renderMarkdown(text)
+      : String(text ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;")
+          .replace(/\n/g, "<br>");
   bubble.replaceChildren(textNode);
 
   if (speaker === "Learny") {
