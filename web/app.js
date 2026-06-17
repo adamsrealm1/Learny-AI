@@ -16,8 +16,12 @@ const ACTIVE_CHAT_KEY = "learny-active-chat-id";
 const SESSION_KEY = "learny-session-id";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_CHECK_INTERVAL_MS = 15000;
+const STATUS_FETCH_TIMEOUT_MS = 8000;
 const ASK_RETRY_BASE_DELAY_MS = 1200;
-const ASK_RETRY_MAX_DELAY_MS = 12000;
+const ASK_RETRY_MAX_DELAY_MS = 3500;
+const ASK_REQUEST_TIMEOUT_MS = 30000;
+const ASK_RETRY_MAX_ATTEMPTS = 2;
+const ASK_RETRY_MAX_ELAPSED_MS = 65000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
 const API_BASE_CANDIDATES = [
@@ -322,7 +326,7 @@ function displayMessage({ speaker, text, source = "", thoughtSeconds = null }) {
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
   node.classList.add(speaker === "You" ? "user" : "learny");
   node.querySelector(".speaker").textContent = speaker;
-  node.querySelector(".source").textContent = source;
+  node.querySelector(".source").textContent = source === "error" ? "" : source;
   const bubble = node.querySelector(".bubble");
   const textNode = document.createElement("span");
   textNode.className = "bubble-text";
@@ -492,6 +496,11 @@ function askRetryDelay(attempt) {
   return Math.min(exponentialDelay, ASK_RETRY_MAX_DELAY_MS);
 }
 
+function retrySleepDuration(attempt, startedAt) {
+  const remaining = ASK_RETRY_MAX_ELAPSED_MS - (performance.now() - startedAt);
+  return Math.max(0, Math.min(askRetryDelay(attempt), remaining));
+}
+
 function isUsableAskResponse(data) {
   if (!data || typeof data !== "object" || data.error) {
     return false;
@@ -507,26 +516,45 @@ function isUsableAskResponse(data) {
   );
 }
 
+function isRetryableAskFailure(data) {
+  return !data || typeof data !== "object" || data.retryable !== false;
+}
+
 async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
   if (DIRECT_FILE_MODE) {
     throw new Error(GENERIC_ERROR_MESSAGE);
   }
 
+  const { timeoutMs = 0, headers = {}, ...fetchOptions } = options;
   const basesToTry = [...new Set(apiBases.filter((base) => typeof base === "string"))];
   if (basesToTry.length === 0) {
     basesToTry.push("");
   }
 
   let lastError = null;
+  const startedAt = performance.now();
   for (const apiBase of basesToTry) {
+    const remainingTimeout =
+      timeoutMs > 0 ? Math.max(0, timeoutMs - (performance.now() - startedAt)) : 0;
+    if (timeoutMs > 0 && remainingTimeout <= 0) {
+      break;
+    }
+
+    const controller =
+      timeoutMs > 0 && "AbortController" in window ? new AbortController() : null;
+    const timeoutId = controller
+      ? window.setTimeout(() => controller.abort(), remainingTimeout)
+      : null;
+
     try {
       const response = await fetch(apiUrl(apiBase, path), {
         headers: {
           "Content-Type": "application/json",
           "X-Learny-Session": sessionId,
-          ...(options.headers || {}),
+          ...headers,
         },
-        ...options,
+        ...fetchOptions,
+        ...(controller ? { signal: controller.signal } : {}),
       });
 
       let data = {};
@@ -547,6 +575,10 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       return data;
     } catch (error) {
       lastError = error;
+    } finally {
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId);
+      }
     }
   }
 
@@ -562,7 +594,11 @@ async function loadStatus() {
   }
 
   try {
-    const status = await apiFetch("/api/status", {}, API_BASE_CANDIDATES);
+    const status = await apiFetch(
+      "/api/status",
+      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+      API_BASE_CANDIDATES,
+    );
     setConnection(status.ok ? "online" : "offline", status.ok ? "Servers online" : "Servers offline");
   } catch (error) {
     if (isSending) {
@@ -589,41 +625,72 @@ async function askLearny(message) {
   messageInput.disabled = true;
 
   let attempt = 0;
-  while (true) {
-    try {
-      const data = await apiFetch("/api/ask", {
-        method: "POST",
-        body: JSON.stringify({ message, sessionId }),
-      }, activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES);
-      if (!isUsableAskResponse(data)) {
-        throw new Error(GENERIC_ERROR_MESSAGE);
+  let completed = false;
+  try {
+    while (!completed) {
+      try {
+        const data = await apiFetch(
+          "/api/ask",
+          {
+            method: "POST",
+            body: JSON.stringify({ message, sessionId }),
+            timeoutMs: ASK_REQUEST_TIMEOUT_MS,
+          },
+          activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+        );
+        if (!isUsableAskResponse(data)) {
+          const error = new Error(GENERIC_ERROR_MESSAGE);
+          error.retryable = isRetryableAskFailure(data);
+          throw error;
+        }
+
+        sessionId = data.sessionId;
+        chat.sessionId = data.sessionId;
+        localStorage.setItem(SESSION_KEY, sessionId);
+        saveChats();
+        typing.remove();
+        const thoughtSeconds = (performance.now() - thoughtStartedAt) / 1000;
+        addMessage({
+          speaker: "Learny",
+          text: data.answer,
+          source: sourceLabel(),
+          thoughtSeconds,
+        });
+        await loadStatus();
+        completed = true;
+      } catch (error) {
+        attempt += 1;
+        const elapsed = performance.now() - thoughtStartedAt;
+        const retryable = error.retryable !== false;
+        const canRetry =
+          retryable &&
+          attempt < ASK_RETRY_MAX_ATTEMPTS &&
+          elapsed < ASK_RETRY_MAX_ELAPSED_MS;
+
+        if (!canRetry) {
+          typing.remove();
+          const thoughtSeconds = elapsed / 1000;
+          addMessage({
+            speaker: "Learny",
+            text: GENERIC_ERROR_MESSAGE,
+            source: "error",
+            thoughtSeconds,
+          });
+          setConnection("offline", "Servers offline");
+          completed = true;
+          continue;
+        }
+
+        setConnection("checking", "Checking server status...");
+        await sleep(retrySleepDuration(attempt, thoughtStartedAt));
       }
-
-      sessionId = data.sessionId;
-      chat.sessionId = data.sessionId;
-      localStorage.setItem(SESSION_KEY, sessionId);
-      saveChats();
-      typing.remove();
-      const thoughtSeconds = (performance.now() - thoughtStartedAt) / 1000;
-      addMessage({
-        speaker: "Learny",
-        text: data.answer,
-        source: sourceLabel(),
-        thoughtSeconds,
-      });
-      await loadStatus();
-      break;
-    } catch (error) {
-      setConnection("checking", "Checking server status...");
-      await sleep(askRetryDelay(attempt));
-      attempt += 1;
     }
+  } finally {
+    isSending = false;
+    sendButton.disabled = false;
+    messageInput.disabled = false;
+    messageInput.focus();
   }
-
-  isSending = false;
-  sendButton.disabled = false;
-  messageInput.disabled = false;
-  messageInput.focus();
 }
 
 chatForm.addEventListener("submit", (event) => {

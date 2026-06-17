@@ -16,6 +16,7 @@ PRIMARY_GROQ_MODEL = "llama-3.1-8b-instant"
 FALLBACK_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_GROQ_MODELS = (PRIMARY_GROQ_MODEL, FALLBACK_GROQ_MODEL)
 GROQ_USER_AGENT = "LearnyAI/0.1 (+https://learny-ai-adamsrealm1.wasmer.app)"
+DEFAULT_GROQ_TIMEOUT_SECONDS = 12.0
 META_ANSWER_MARKERS = (
     "current user question",
     "previous conversation",
@@ -110,7 +111,7 @@ class GroqAnswerGenerator:
         transport: ChatTransport,
         *,
         models: tuple[str, ...] = DEFAULT_GROQ_MODELS,
-        timeout: float = 30.0,
+        timeout: float = DEFAULT_GROQ_TIMEOUT_SECONDS,
     ) -> None:
         if not models:
             raise ValueError("At least one Groq model is required.")

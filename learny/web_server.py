@@ -172,10 +172,11 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 or self.headers.get("X-Learny-Session")
             )
             _repair_knowledge_file(config.knowledge_path)
+            generator = config.generator_factory()
             try:
                 bot = Learny.from_file(
                     config.knowledge_path,
-                    generator=config.generator_factory(),
+                    generator=generator,
                     history=history,
                 )
             except (FileNotFoundError, KnowledgeFormatError):
@@ -194,6 +195,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "learned": response.learned,
                     "matchedQuestion": response.matched_question,
                     "model": response.model,
+                    "retryable": response.source == "unknown" and generator is not None,
                 }
             )
 
