@@ -711,7 +711,7 @@ input:focus-visible {
   transform: translate(-50%, -50%);
   place-items: center;
   pointer-events: none;
-  animation: welcomeFadeIn 520ms ease 2s both;
+  animation: welcomeFadeIn 520ms ease 60ms both;
   transition: opacity 160ms ease;
 }
 
