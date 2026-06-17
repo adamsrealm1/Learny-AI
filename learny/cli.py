@@ -1,71 +1,35 @@
 from __future__ import annotations
 
 import argparse
-import os
-import random
-from pathlib import Path
 
 from .bot import Learny
-from .groq_client import GroqAnswerGenerator
-from .knowledge import KnowledgeFormatError
+from .groq_client import DEFAULT_GROQ_MODELS, GroqAnswerGenerator
 from .messages import GENERIC_ERROR_MESSAGE
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-LOCAL_STATE_DIR = PROJECT_ROOT / ".learny-state"
-DEFAULT_KNOWLEDGE_PATH = Path(
-    os.environ.get("LEARNY_KNOWLEDGE_PATH") or LOCAL_STATE_DIR / "knowledge.json"
-)
 EXIT_WORDS = {"exit", "quit", "q"}
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="learny",
-        description="Run Learny, a local-only JSON-powered Python chatbot.",
-    )
-    parser.add_argument(
-        "--knowledge",
-        default=DEFAULT_KNOWLEDGE_PATH,
-        type=Path,
-        help="Path to the JSON knowledge file.",
+        description="Run Learny as a Groq-powered Python chatbot.",
     )
     parser.add_argument(
         "--once",
         metavar="QUESTION",
         help="Ask one question, print the answer, and exit.",
     )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        help="Optional random seed for repeatable answer choices.",
-    )
-    parser.add_argument(
-        "--offline",
-        action="store_true",
-        help="Only use local JSON knowledge. Do not call Groq for unknown questions.",
-    )
     return parser
 
 
-def create_bot(knowledge_path: Path, seed: int | None, offline: bool) -> Learny:
-    ensure_knowledge_file(knowledge_path)
-    rng = random.Random(seed) if seed is not None else None
-    generator = None if offline else GroqAnswerGenerator.from_env()
-    return Learny.from_file(knowledge_path, generator=generator, rng=rng)
+def create_bot() -> Learny:
+    return Learny(generator=GroqAnswerGenerator.from_env())
 
 
-def ensure_knowledge_file(knowledge_path: Path) -> None:
-    if knowledge_path.exists():
-        return
-    knowledge_path.parent.mkdir(parents=True, exist_ok=True)
-    knowledge_path.write_text('{"questions": {}}\n', encoding="utf-8")
-
-
-def run_chat(bot: Learny, knowledge_path: Path) -> None:
-    print("Learny AI is running locally.")
-    print(f"Knowledge file: {knowledge_path}")
-    print(f"Groq learning: {'on' if bot.generator is not None else 'off'}")
+def run_chat(bot: Learny) -> None:
+    print("Learny AI is running.")
+    print(f"Groq models: {', '.join(DEFAULT_GROQ_MODELS)}")
     print("Type a question. Type 'quit' or 'exit' to stop.")
     print()
 
@@ -87,14 +51,9 @@ def run_chat(bot: Learny, knowledge_path: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    knowledge_path = args.knowledge.resolve()
+    bot = create_bot()
 
-    try:
-        bot = create_bot(knowledge_path, args.seed, args.offline)
-    except FileNotFoundError:
-        print(GENERIC_ERROR_MESSAGE)
-        return 1
-    except KnowledgeFormatError:
+    if bot.generator is None:
         print(GENERIC_ERROR_MESSAGE)
         return 1
 
@@ -102,5 +61,5 @@ def main(argv: list[str] | None = None) -> int:
         print(bot.answer(args.once))
         return 0
 
-    run_chat(bot, knowledge_path)
+    run_chat(bot)
     return 0

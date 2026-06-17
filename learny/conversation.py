@@ -12,7 +12,7 @@ class ConversationTurn:
 
 
 class ConversationHistory:
-    """Keeps recent in-memory chat context for follow-up questions."""
+    """Keeps recent session chat context for follow-up questions."""
 
     def __init__(self, max_turns: int = 6) -> None:
         if max_turns < 1:

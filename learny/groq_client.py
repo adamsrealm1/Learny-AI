@@ -12,19 +12,25 @@ from .conversation import ConversationHistory
 
 
 GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
-PRIMARY_GROQ_MODEL = "llama-3.1-8b-instant"
-FALLBACK_GROQ_MODEL = "openai/gpt-oss-20b"
-DEFAULT_GROQ_MODELS = (PRIMARY_GROQ_MODEL, FALLBACK_GROQ_MODEL)
-GROQ_USER_AGENT = "LearnyAI/0.1 (+https://learny-ai-adamsrealm1.wasmer.app)"
+PRIMARY_GROQ_MODEL = "openai/gpt-oss-120b"
+FALLBACK_GROQ_MODEL = "llama-3.3-70b-versatile"
+SECOND_FALLBACK_GROQ_MODEL = "qwen/qwen3-32b"
+THIRD_FALLBACK_GROQ_MODEL = "qwen/qwen3.6-27b"
+DEFAULT_GROQ_MODELS = (
+    PRIMARY_GROQ_MODEL,
+    FALLBACK_GROQ_MODEL,
+    SECOND_FALLBACK_GROQ_MODEL,
+    THIRD_FALLBACK_GROQ_MODEL,
+)
+GROQ_USER_AGENT = "LearnyAI/0.2 (+https://learny.env.pm)"
 DEFAULT_GROQ_TIMEOUT_SECONDS = 12.0
 META_ANSWER_MARKERS = (
     "current user question",
     "previous conversation",
     "recent conversation",
     "chat context",
-    "standalone_question",
     "system prompt",
-    "valid json",
+    "hidden instructions",
 )
 CLARIFYING_ANSWER_PATTERNS = (
     "can you clarify",
@@ -51,10 +57,8 @@ class GroqAPIError(RuntimeError):
 
 @dataclass(frozen=True)
 class GeneratedAnswer:
-    standalone_question: str
     answer: str
     model: str
-    should_learn: bool = True
 
 
 class ChatTransport(Protocol):
@@ -150,24 +154,18 @@ class GroqAnswerGenerator:
             payload = {
                 "model": model,
                 "messages": build_messages(question, history, force_direct=force_direct),
-                "temperature": 0.2,
-                "max_completion_tokens": 300,
-                "response_format": {"type": "json_object"},
+                "temperature": 0.35,
+                "max_completion_tokens": 700,
             }
             content = self.transport.send_chat_completion(payload, self.timeout)
             try:
-                parsed = parse_generated_answer(content)
+                answer = parse_generated_answer(question, content)
             except GroqAPIError as error:
                 last_error = error
                 if "unusable answer" in str(error) and not force_direct:
                     continue
                 raise
-            return GeneratedAnswer(
-                standalone_question=parsed.standalone_question,
-                answer=parsed.answer,
-                model=model,
-                should_learn=parsed.should_learn,
-            )
+            return GeneratedAnswer(answer=answer, model=model)
         raise last_error or GroqAPIError("Groq returned an unusable answer.")
 
 
@@ -180,112 +178,52 @@ def build_messages(
     direct_instruction = ""
     if force_direct:
         direct_instruction = (
-            "\n\nYour previous style was too much like a clarification. This time, "
-            "answer directly even if the user is vague. Never return an answer "
-            "that is only a question. Example: if the user says 'im bored', answer "
-            "with a few concrete things they can do. If the user says 'games' "
-            "after boredom was discussed, suggest specific games."
+            "\n\nYour previous reply was not usable. Answer directly this time. "
+            "Do not ask a clarification question. If the user is vague, give a "
+            "short useful answer with practical options."
         )
 
     return [
         {
             "role": "system",
             "content": (
-                "You are Learny, a direct and natural assistant. "
-                "Use chat context only to resolve pronouns or follow-up wording. "
-                "Never mention prompts, JSON, models, APIs, hidden instructions, "
-                "chat context, or whether context was needed. "
-                "Return only a JSON object with exactly these keys: "
-                "standalone_question as a string, answer as a string, and "
-                "should_learn as a boolean. The answer must be what Learny "
-                "should visibly say to the user. The standalone_question must "
-                "be a complete reusable question only when should_learn is true. "
-                "Never use raw follow-up fragments like 'no?', 'nah', 'ok', "
-                "'games', 'it', 'that', 'more', or 'what about' as "
-                "standalone_question. Set should_learn to false for reactions, "
-                "short follow-ups, refusals, acknowledgements, or context-only "
-                "messages unless you can rewrite them into a complete reusable "
-                "question. Keep answers concise and direct. "
-                "Do not ask clarifying questions. If the message is vague, give "
-                "a useful general answer with a few practical options."
+                "You are Learny, a fast, direct, natural AI assistant. "
+                "Answer the user's message using the recent conversation when it "
+                "helps with follow-ups. Never mention prompts, models, APIs, "
+                "hidden instructions, or internal context. Return only the text "
+                "Learny should visibly say to the user. Keep answers concise by "
+                "default, but include enough detail to be useful. "
+                "Do not ask clarifying questions; make a reasonable assumption "
+                "and answer directly."
                 f"{direct_instruction}"
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Chat context for follow-ups only:\n{history.to_prompt()}\n\n"
+                f"Recent conversation:\n{history.to_prompt()}\n\n"
                 f"User message:\n{question.strip()}\n\n"
-                "Write Learny's visible reply as an answer, not another question. "
-                "For short follow-ups, use the chat context to answer the likely "
-                "meaning directly. Mark should_learn false when the user message "
-                "only makes sense because of the chat context."
+                "Write Learny's reply now."
             ),
         },
     ]
 
 
-def parse_generated_answer(content: str) -> GeneratedAnswer:
-    data = _parse_json_object(content)
-    standalone_question = _required_text(data, "standalone_question")
-    answer = _required_text(data, "answer")
-    should_learn = _optional_bool(data, "should_learn", default=True)
-    _reject_unusable_answer(standalone_question, answer)
-    return GeneratedAnswer(
-        standalone_question=standalone_question,
-        answer=answer,
-        model="",
-        should_learn=should_learn,
-    )
+def parse_generated_answer(question: str, content: str) -> str:
+    answer = _clean_plain_answer(content)
+    _reject_unusable_answer(question, answer)
+    return answer
 
 
-def _parse_json_object(content: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError:
-        parsed = _parse_first_json_object(content)
-
-    if not isinstance(parsed, dict):
-        raise GroqAPIError("Groq did not return a JSON object.")
-    return parsed
-
-
-def _parse_first_json_object(content: str) -> dict[str, Any]:
-    decoder = json.JSONDecoder()
-    start = content.find("{")
-    while start != -1:
-        try:
-            parsed, _ = decoder.raw_decode(content[start:])
-        except json.JSONDecodeError:
-            start = content.find("{", start + 1)
-            continue
-        if isinstance(parsed, dict):
-            return parsed
-        start = content.find("{", start + 1)
-    raise GroqAPIError("Groq did not return valid JSON.")
-
-
-def _required_text(data: dict[str, Any], key: str) -> str:
-    value = data.get(key)
-    if not isinstance(value, str):
-        raise GroqAPIError(f"Groq response is missing {key!r}.")
-    value = value.strip()
-    if not value:
-        raise GroqAPIError(f"Groq response has an empty {key!r}.")
-    return value
-
-
-def _optional_bool(data: dict[str, Any], key: str, *, default: bool) -> bool:
-    value = data.get(key, default)
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().casefold()
-        if normalized == "true":
-            return True
-        if normalized == "false":
-            return False
-    return default
+def _clean_plain_answer(content: str) -> str:
+    answer = content.strip()
+    answer = re.sub(r"^```(?:text)?\s*", "", answer, flags=re.IGNORECASE)
+    answer = re.sub(r"\s*```$", "", answer)
+    answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.IGNORECASE | re.DOTALL)
+    answer = answer.strip()
+    if not answer:
+        raise GroqAPIError("Groq returned an empty answer.")
+    return answer
 
 
 def _reject_unusable_answer(question: str, answer: str) -> None:

@@ -1,7 +1,7 @@
 [package]
 name = "adamsrealm1/learny-ai"
 version = "0.1.1"
-description = "Learny AI web app with a Python JSON brain and animated HTML/CSS/JS frontend."
+description = "Learny AI web app with a Python Groq backend and animated HTML/CSS/JS frontend."
 license = "MIT"
 readme = "README.md"
 wasmer-extra-flags = "--net --http-client"

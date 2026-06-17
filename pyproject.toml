@@ -1,7 +1,7 @@
 [project]
 name = "learny-ai"
 version = "0.1.0"
-description = "A Python JSON-backed Learny AI website with optional Groq learning."
+description = "A Groq-powered Learny AI website."
 requires-python = ">=3.10"
 dependencies = []
 

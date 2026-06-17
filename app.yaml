@@ -4,10 +4,6 @@ owner: adamsrealm1
 package: .
 env:
   PYTHONEXECUTABLE: /bin/python
-  LEARNY_KNOWLEDGE_PATH: /state/knowledge.json
 cli_args:
 - /src/main.py
-volumes:
-- name: knowledge
-  mount: /state
 kind: wasmer.io/App.v0

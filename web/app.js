@@ -19,8 +19,8 @@ const STATUS_CHECK_INTERVAL_MS = 15000;
 const STATUS_FETCH_TIMEOUT_MS = 8000;
 const ASK_RETRY_BASE_DELAY_MS = 1200;
 const ASK_RETRY_MAX_DELAY_MS = 3500;
-const ASK_REQUEST_TIMEOUT_MS = 30000;
-const ASK_RETRY_MAX_ATTEMPTS = 2;
+const ASK_REQUEST_TIMEOUT_MS = 60000;
+const ASK_RETRY_MAX_ATTEMPTS = 1;
 const ASK_RETRY_MAX_ELAPSED_MS = 65000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
@@ -36,9 +36,8 @@ const PROMPT_META_MARKERS = [
   "previous conversation",
   "recent conversation",
   "chat context",
-  "standalone_question",
   "system prompt",
-  "valid json",
+  "hidden instructions",
 ];
 
 let chats = loadStoredChats();
