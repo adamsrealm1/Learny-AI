@@ -161,21 +161,6 @@ input:focus-visible {
   animation: sidebarAura 13s ease-in-out infinite alternate;
 }
 
-.sidebar::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background:
-    linear-gradient(115deg, transparent 0 18%, rgba(255, 255, 255, 0.12) 36%, transparent 54%),
-    radial-gradient(circle at 22% 0, rgba(88, 101, 255, 0.18), transparent 28%),
-    radial-gradient(circle at 100% 92%, rgba(61, 139, 255, 0.12), transparent 32%);
-  opacity: 0.38;
-  pointer-events: none;
-  transform: translate3d(-18%, 0, 0);
-  animation: sidebarSheen 8s ease-in-out infinite;
-}
-
 .sidebar > * {
   position: relative;
   z-index: 1;
@@ -920,21 +905,6 @@ input:focus-visible {
   100% {
     opacity: 0.56;
     transform: translate3d(-1%, 3%, 0) scale(1.02);
-  }
-}
-
-@keyframes sidebarSheen {
-  0%,
-  28% {
-    opacity: 0.16;
-    transform: translate3d(-42%, 0, 0);
-  }
-  52% {
-    opacity: 0.42;
-  }
-  100% {
-    opacity: 0.2;
-    transform: translate3d(42%, 0, 0);
   }
 }
 
