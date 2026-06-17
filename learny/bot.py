@@ -13,9 +13,15 @@ from .groq_client import (
 )
 from .knowledge import KnowledgeBase, load_knowledge_file
 from .memory import remember_answer
+from .text import normalize_text
 
 
 DEFAULT_FALLBACK = "I do not know that yet."
+GREETING_FALLBACKS = {
+    "hi": "Hi!",
+    "hello": "Hello!",
+    "hey": "Hey!",
+}
 
 
 class RandomChooser(Protocol):
@@ -141,7 +147,9 @@ class Learny:
 
         generated = self.generator.generate(user_message, self.history)
         if generated is None:
-            return None
+            generated = self._fallback_generated_answer(user_message)
+            if generated is None:
+                return None
         if is_unusable_generated_answer(
             generated.standalone_question,
             generated.answer,
@@ -154,3 +162,14 @@ class Learny:
             generated.answer,
         )
         return generated
+
+    def _fallback_generated_answer(self, user_message: str) -> GeneratedAnswer | None:
+        normalized = normalize_text(user_message)
+        answer = GREETING_FALLBACKS.get(normalized)
+        if answer is None:
+            return None
+        return GeneratedAnswer(
+            standalone_question=normalized,
+            answer=answer,
+            model="local-greeting",
+        )

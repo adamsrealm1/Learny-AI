@@ -5,7 +5,6 @@ import json
 import mimetypes
 import os
 import secrets
-import uuid
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -87,6 +86,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             print(f"{self.address_string()} - {format % args}")
 
         def _handle_status(self) -> None:
+            _repair_knowledge_file(config.knowledge_path)
             try:
                 knowledge = load_knowledge_file(config.knowledge_path)
                 knowledge_ok = True
@@ -113,6 +113,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             )
 
         def _handle_knowledge(self) -> None:
+            _repair_knowledge_file(config.knowledge_path)
             try:
                 knowledge = load_knowledge_file(config.knowledge_path)
             except (FileNotFoundError, KnowledgeFormatError):
@@ -147,6 +148,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 _optional_string(body, "sessionId")
                 or self.headers.get("X-Learny-Session")
             )
+            _repair_knowledge_file(config.knowledge_path)
             try:
                 bot = Learny.from_file(
                     config.knowledge_path,
@@ -310,28 +312,75 @@ def _ensure_knowledge_file(knowledge_path: Path) -> None:
     if knowledge_path.exists():
         return
 
-    knowledge_path.parent.mkdir(parents=True, exist_ok=True)
-    knowledge_path.write_text('{"questions": {}}\n', encoding="utf-8")
+    _write_json_file(knowledge_path, {"questions": {}})
 
 
 def _repair_knowledge_file(knowledge_path: Path) -> None:
-    try:
-        raw_data = json.loads(knowledge_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return
-    if not isinstance(raw_data, dict):
-        return
+    raw_data, changed = _load_repairable_knowledge_json(knowledge_path)
 
     raw_questions = raw_data.get("questions")
     if isinstance(raw_questions, dict):
-        changed = _repair_question_mapping(raw_questions)
+        changed = _repair_question_mapping(raw_questions) or changed
     elif isinstance(raw_questions, list):
-        changed = _repair_question_list(raw_questions)
+        changed = _repair_question_list(raw_questions) or changed
     else:
-        return
+        raw_data["questions"] = {}
+        changed = True
 
     if changed:
         _write_json_file(knowledge_path, raw_data)
+
+
+def _load_repairable_knowledge_json(knowledge_path: Path) -> tuple[dict[str, Any], bool]:
+    raw_data = _read_strict_json_file(knowledge_path)
+    if raw_data is not None:
+        return raw_data, False
+
+    raw_data = _read_recoverable_json_file(knowledge_path)
+    if raw_data is not None:
+        return raw_data, True
+
+    for recovery_path in (_next_path(knowledge_path), _backup_path(knowledge_path)):
+        raw_data = _read_strict_json_file(recovery_path)
+        if raw_data is None:
+            raw_data = _read_recoverable_json_file(recovery_path)
+        if raw_data is None:
+            continue
+        return raw_data, True
+
+    return {"questions": {}}, True
+
+
+def _read_recoverable_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        raw_text = path.read_bytes().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    try:
+        raw_data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        raw_data = _parse_recoverable_json_prefix(raw_text)
+
+    return raw_data if isinstance(raw_data, dict) else None
+
+
+def _read_strict_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+        raw_data = json.loads(raw_text)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return raw_data if isinstance(raw_data, dict) else None
+
+
+def _parse_recoverable_json_prefix(raw_text: str) -> dict[str, Any] | None:
+    decoder = json.JSONDecoder()
+    try:
+        parsed, _ = decoder.raw_decode(raw_text.lstrip())
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def _repair_question_mapping(raw_questions: dict[Any, Any]) -> bool:
@@ -386,15 +435,43 @@ def _repaired_answers(question: str, raw_answers: Any) -> list[str] | None:
 
 
 def _write_json_file(path: Path, raw_data: dict[str, Any]) -> None:
-    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_and_verify_json(_next_path(path), raw_data)
+    _write_and_verify_json(_backup_path(path), raw_data)
+    _write_and_verify_json(path, raw_data)
+
+
+def _write_and_verify_json(path: Path, raw_data: dict[str, Any]) -> None:
+    payload = (json.dumps(raw_data, indent=2) + "\n").encode("utf-8")
     try:
-        with temporary_path.open("w", encoding="utf-8") as file:
-            json.dump(raw_data, file, indent=2)
-            file.write("\n")
-        temporary_path.replace(path)
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+    open_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, open_flags, 0o666)
+    try:
+        view = memoryview(payload)
+        bytes_written = 0
+        while bytes_written < len(payload):
+            bytes_written += os.write(descriptor, view[bytes_written:])
+        try:
+            os.fsync(descriptor)
+        except OSError:
+            pass
     finally:
-        if temporary_path.exists():
-            temporary_path.unlink()
+        os.close(descriptor)
+
+    if _read_strict_json_file(path) != raw_data:
+        raise KnowledgeFormatError(f"{path} could not be verified after writing.")
+
+
+def _next_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.next")
+
+
+def _backup_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.backup")
 
 
 def _safe_static_path(static_dir: Path, route: str) -> Path:

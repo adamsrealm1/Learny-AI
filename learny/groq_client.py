@@ -41,6 +41,7 @@ CLARIFYING_ANSWER_PATTERNS = (
     "i need a little more",
     "i need some more",
 )
+GREETING_PHRASES = {"hi", "hello", "hey"}
 
 
 class GroqAPIError(RuntimeError):
@@ -275,6 +276,11 @@ def is_prompt_meta_answer(answer: str) -> bool:
 def is_unusable_generated_answer(question: str, answer: str) -> bool:
     normalized_question = _normalize_for_comparison(question)
     normalized_answer = _normalize_for_comparison(answer)
+    if (
+        normalized_question in GREETING_PHRASES
+        and normalized_answer in GREETING_PHRASES
+    ):
+        return False
     if normalized_question and normalized_question == normalized_answer:
         return True
 

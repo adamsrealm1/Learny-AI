@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -34,18 +34,50 @@ def remember_answer(path: str | Path, question: str, answer: str) -> KnowledgeBa
 
 
 def _load_raw_knowledge(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as file:
-        try:
-            raw_data = json.load(file)
-        except json.JSONDecodeError as error:
-            raise KnowledgeFormatError(
-                f"{path} is not valid JSON: {error.msg} "
-                f"at line {error.lineno}, column {error.colno}."
-            ) from error
+    raw_data = _read_recoverable_json_file(path)
+    if raw_data is None:
+        raw_data = _recover_from_sidecar(path)
+    if raw_data is None:
+        raw_data = {"questions": {}}
+        _write_raw_knowledge(path, raw_data)
 
     if not isinstance(raw_data, dict):
         raise KnowledgeFormatError("The root JSON value must be an object.")
     return raw_data
+
+
+def _read_recoverable_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        raw_text = path.read_bytes().decode("utf-8", errors="ignore")
+    except OSError:
+        return None
+
+    try:
+        raw_data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        raw_data = _parse_recoverable_json_prefix(raw_text)
+
+    if not isinstance(raw_data, dict):
+        return None
+    return raw_data
+
+
+def _read_strict_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        raw_text = path.read_text(encoding="utf-8")
+        raw_data = json.loads(raw_text)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return raw_data if isinstance(raw_data, dict) else None
+
+
+def _recover_from_sidecar(path: Path) -> dict[str, Any] | None:
+    for recovery_path in (_next_path(path), _backup_path(path)):
+        raw_data = _read_recoverable_json_file(recovery_path)
+        if raw_data is not None:
+            _write_raw_knowledge(path, raw_data)
+            return raw_data
+    return None
 
 
 def _remember_in_mapping(
@@ -112,15 +144,53 @@ def _with_answer(raw_answers: Any, answer: str) -> list[str]:
 
 
 def _write_raw_knowledge(path: Path, raw_data: dict[str, Any]) -> None:
-    temporary_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_and_verify_json(_next_path(path), raw_data)
+    _write_and_verify_json(_backup_path(path), raw_data)
+    _write_and_verify_json(path, raw_data)
+
+
+def _write_and_verify_json(path: Path, raw_data: dict[str, Any]) -> None:
+    payload = (json.dumps(raw_data, indent=2) + "\n").encode("utf-8")
     try:
-        with temporary_path.open("w", encoding="utf-8") as file:
-            json.dump(raw_data, file, indent=2)
-            file.write("\n")
-        temporary_path.replace(path)
+        path.unlink()
+    except FileNotFoundError:
+        pass
+
+    open_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, open_flags, 0o666)
+    try:
+        view = memoryview(payload)
+        bytes_written = 0
+        while bytes_written < len(payload):
+            bytes_written += os.write(descriptor, view[bytes_written:])
+        try:
+            os.fsync(descriptor)
+        except OSError:
+            pass
     finally:
-        if temporary_path.exists():
-            temporary_path.unlink()
+        os.close(descriptor)
+
+    verified_data = _read_strict_json_file(path)
+    if verified_data != raw_data:
+        raise KnowledgeFormatError(f"{path} could not be verified after writing.")
+
+
+def _parse_recoverable_json_prefix(raw_text: str) -> dict[str, Any] | None:
+    decoder = json.JSONDecoder()
+    try:
+        parsed, _ = decoder.raw_decode(raw_text.lstrip())
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _next_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.next")
+
+
+def _backup_path(path: Path) -> Path:
+    return path.with_name(f".{path.name}.backup")
 
 
 def _required_text(value: str, label: str) -> str:
