@@ -368,11 +368,11 @@ input:focus-visible {
     inset 0 1px rgba(255, 255, 255, 0.28);
   overflow: hidden;
   transition:
-    width 200ms cubic-bezier(0.2, 0.9, 0.2, 1),
-    gap 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease,
-    filter 160ms ease;
+    width 400ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    gap 400ms ease,
+    box-shadow 400ms ease,
+    transform 400ms ease,
+    filter 400ms ease;
 }
 
 .add-chat-button::after {
@@ -384,7 +384,7 @@ input:focus-visible {
   opacity: 0;
   overflow: hidden;
   transform: translateX(-4px);
-  transition: max-width 180ms ease, opacity 150ms ease, transform 150ms ease;
+  transition: max-width 400ms ease, opacity 400ms ease, transform 400ms ease;
   white-space: nowrap;
 }
 
@@ -711,8 +711,8 @@ input:focus-visible {
   transform: translate(-50%, -50%);
   place-items: center;
   pointer-events: none;
-  animation: welcomeFadeIn 520ms ease 60ms both;
-  transition: opacity 160ms ease;
+  animation: welcomeFadeIn 60ms ease 60ms both;
+  transition: opacity 200ms ease;
 }
 
 .empty-state.hidden {
