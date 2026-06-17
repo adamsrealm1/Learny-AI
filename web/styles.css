@@ -352,7 +352,7 @@ input:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 0;
   width: 34px;
   height: 26px;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -369,6 +369,7 @@ input:focus-visible {
   overflow: hidden;
   transition:
     width 200ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    gap 160ms ease,
     box-shadow 160ms ease,
     transform 160ms ease,
     filter 160ms ease;
@@ -389,6 +390,7 @@ input:focus-visible {
 
 .add-chat-button:hover {
   width: 68px;
+  gap: 5px;
   filter: brightness(1.08);
   box-shadow:
     0 13px 30px rgba(68, 90, 255, 0.34),
