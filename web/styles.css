@@ -142,7 +142,6 @@ input:focus-visible {
   overflow: hidden;
   backdrop-filter: blur(34px) saturate(1.45);
   -webkit-backdrop-filter: blur(34px) saturate(1.45);
-  animation: sidebarFloat 11s ease-in-out infinite;
 }
 
 .sidebar::before {
@@ -777,7 +776,7 @@ input:focus-visible {
   opacity: 0;
   overflow: hidden;
   transform: translateY(-2px);
-  transition: opacity 160ms ease, transform 160ms ease, max-height 160ms ease, margin-top 160ms ease;
+  transition: opacity 400ms ease, transform 400ms ease, max-height 400ms ease, margin-top 400ms ease;
 }
 
 .message.learny .bubble:hover .thought-time,
@@ -874,22 +873,6 @@ input:focus-visible {
 @keyframes spin {
   to {
     transform: rotate(1turn);
-  }
-}
-
-@keyframes sidebarFloat {
-  0%,
-  100% {
-    box-shadow:
-      inset -1px 0 rgba(255, 255, 255, 0.07),
-      inset 0 1px rgba(255, 255, 255, 0.08),
-      18px 0 60px rgba(0, 0, 0, 0.38);
-  }
-  50% {
-    box-shadow:
-      inset -1px 0 rgba(255, 255, 255, 0.1),
-      inset 0 1px rgba(255, 255, 255, 0.12),
-      24px 0 72px rgba(41, 55, 150, 0.24);
   }
 }
 
