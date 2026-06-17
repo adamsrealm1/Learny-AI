@@ -17,6 +17,11 @@ const SESSION_KEY = "learny-session-id";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_CHECK_INTERVAL_MS = 15000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
+const API_BASE_CANDIDATES = [
+  "",
+  "https://learny-ai-adamsrealm1.wasmer.app",
+  "https://learny-ai.wasmer.app",
+];
 const DESKTOP_STAR_COUNT = 360;
 const MOBILE_STAR_COUNT = 230;
 const PROMPT_META_MARKERS = [
@@ -34,6 +39,7 @@ let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
 let sessionId = "";
 let isSending = false;
 let chatSearchQuery = "";
+let activeApiBase = "";
 
 function createId(prefix) {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -461,31 +467,61 @@ function addTyping() {
   return node;
 }
 
-async function apiFetch(path, options = {}) {
+function apiUrl(apiBase, path) {
+  return `${apiBase}${path}`;
+}
+
+function isApiResponseData(data) {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+  return "app" in data || "answer" in data || "questions" in data || "error" in data;
+}
+
+async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
   if (DIRECT_FILE_MODE) {
     throw new Error(GENERIC_ERROR_MESSAGE);
   }
 
-  const response = await fetch(path, {
-    headers: {
-      "Content-Type": "application/json",
-      "X-Learny-Session": sessionId,
-      ...(options.headers || {}),
-    },
-    ...options,
-  });
-
-  let data = {};
-  try {
-    data = await response.json();
-  } catch {
-    data = {};
+  const basesToTry = [...new Set(apiBases.filter((base) => typeof base === "string"))];
+  if (basesToTry.length === 0) {
+    basesToTry.push("");
   }
 
-  if (!response.ok) {
-    throw new Error(GENERIC_ERROR_MESSAGE);
+  let lastError = null;
+  for (const apiBase of basesToTry) {
+    try {
+      const response = await fetch(apiUrl(apiBase, path), {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Learny-Session": sessionId,
+          ...(options.headers || {}),
+        },
+        ...options,
+      });
+
+      let data = {};
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
+      }
+
+      if (!response.ok) {
+        throw new Error(GENERIC_ERROR_MESSAGE);
+      }
+      if (!isApiResponseData(data)) {
+        throw new Error(GENERIC_ERROR_MESSAGE);
+      }
+
+      activeApiBase = apiBase;
+      return data;
+    } catch (error) {
+      lastError = error;
+    }
   }
-  return data;
+
+  throw lastError || new Error(GENERIC_ERROR_MESSAGE);
 }
 
 async function loadStatus() {
@@ -497,7 +533,7 @@ async function loadStatus() {
   }
 
   try {
-    const status = await apiFetch("/api/status");
+    const status = await apiFetch("/api/status", {}, API_BASE_CANDIDATES);
     setConnection(status.ok ? "online" : "offline", status.ok ? "Servers online" : "Servers offline");
   } catch (error) {
     setConnection("offline", "Servers offline");
@@ -523,7 +559,7 @@ async function askLearny(message) {
     const data = await apiFetch("/api/ask", {
       method: "POST",
       body: JSON.stringify({ message, sessionId }),
-    });
+    }, activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES);
     sessionId = data.sessionId;
     chat.sessionId = data.sessionId;
     localStorage.setItem(SESSION_KEY, sessionId);

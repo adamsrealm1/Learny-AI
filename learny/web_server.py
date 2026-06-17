@@ -35,6 +35,11 @@ LOCAL_STATE_DIR = PROJECT_ROOT / ".learny-state"
 LOCAL_KNOWLEDGE_PATH = LOCAL_STATE_DIR / "knowledge.json"
 WASMER_STATE_KNOWLEDGE_PATH = WASMER_STATE_DIR / "knowledge.json"
 KNOWLEDGE_PATH_ENV = "LEARNY_KNOWLEDGE_PATH"
+ALLOWED_CORS_ORIGINS = {
+    "https://learny.env.pm",
+    "https://learny-ai-adamsrealm1.wasmer.app",
+    "https://learny-ai.wasmer.app",
+}
 
 
 @dataclass(frozen=True)
@@ -81,6 +86,21 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             route = urlsplit(self.path).path
             if route == "/api/ask":
                 self._handle_ask()
+                return
+            self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.NOT_FOUND)
+
+        def do_OPTIONS(self) -> None:
+            route = urlsplit(self.path).path
+            if route.startswith("/api/"):
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self._send_cors_headers()
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header(
+                    "Access-Control-Allow-Headers",
+                    "Content-Type, X-Learny-Session",
+                )
+                self.send_header("Access-Control-Max-Age", "86400")
+                self.end_headers()
                 return
             self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.NOT_FOUND)
 
@@ -232,6 +252,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Cache-Control", "no-store")
+            self._send_cors_headers()
             self.end_headers()
             self.wfile.write(payload)
 
@@ -244,8 +265,16 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self.send_response(status)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Content-Length", str(len(payload)))
+            self._send_cors_headers()
             self.end_headers()
             self.wfile.write(payload)
+
+        def _send_cors_headers(self) -> None:
+            origin = self.headers.get("Origin", "").strip()
+            if not _is_allowed_cors_origin(origin):
+                return
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
 
     return LearnyRequestHandler
 
@@ -497,6 +526,12 @@ def _safe_static_path(static_dir: Path, route: str) -> Path:
 
 def _uses_root_static_layout(static_dir: Path) -> bool:
     return (static_dir / "index.html").is_file() and (static_dir / "web").is_dir()
+
+
+def _is_allowed_cors_origin(origin: str) -> bool:
+    if origin in ALLOWED_CORS_ORIGINS:
+        return True
+    return origin.startswith("http://127.0.0.1:") or origin.startswith("http://localhost:")
 
 
 def _required_string(body: dict[str, Any], key: str) -> str:
