@@ -27,8 +27,10 @@ from .messages import GENERIC_ERROR_MESSAGE
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 WASMER_ROOT = Path("/")
+WASMER_APP_DIR = WASMER_ROOT / "app"
 WASMER_STATE_DIR = WASMER_ROOT / "state"
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
+DEFAULT_STATIC_ROOT = PROJECT_ROOT
 LOCAL_STATE_DIR = PROJECT_ROOT / ".learny-state"
 LOCAL_KNOWLEDGE_PATH = LOCAL_STATE_DIR / "knowledge.json"
 WASMER_STATE_KNOWLEDGE_PATH = WASMER_STATE_DIR / "knowledge.json"
@@ -294,8 +296,14 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _default_static_dir() -> Path:
+    if (WASMER_APP_DIR / "index.html").exists():
+        return WASMER_APP_DIR
+    if (WASMER_ROOT / "index.html").exists():
+        return WASMER_ROOT
     if (WASMER_ROOT / "web" / "index.html").exists():
         return WASMER_ROOT / "web"
+    if (DEFAULT_STATIC_ROOT / "index.html").exists():
+        return DEFAULT_STATIC_ROOT
     return DEFAULT_STATIC_DIR
 
 
@@ -478,11 +486,17 @@ def _safe_static_path(static_dir: Path, route: str) -> Path:
     route = unquote(route).replace("\\", "/").lstrip("/")
     if not route:
         route = "index.html"
+    if _uses_root_static_layout(static_dir) and route != "index.html" and not route.startswith("web/"):
+        raise ValueError("Static path is not part of the public web files.")
     candidate = (static_dir / route).resolve()
     static_root = static_dir.resolve()
     if candidate == static_root or static_root not in candidate.parents:
         raise ValueError("Static path escaped the web directory.")
     return candidate
+
+
+def _uses_root_static_layout(static_dir: Path) -> bool:
+    return (static_dir / "index.html").is_file() and (static_dir / "web").is_dir()
 
 
 def _required_string(body: dict[str, Any], key: str) -> str:

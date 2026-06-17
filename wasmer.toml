@@ -10,6 +10,7 @@ wasmer-extra-flags = "--net --http-client"
 "python/python" = "*"
 
 [fs]
+"/app" = "."
 "/src" = "./src"
 "/learny" = "./learny"
 "/web" = "./web"
