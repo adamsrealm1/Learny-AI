@@ -12,6 +12,7 @@ from .groq_client import (
     is_unusable_generated_answer,
 )
 from .knowledge import KnowledgeBase, load_knowledge_file
+from .learning_rules import is_safe_learned_question
 from .memory import remember_answer
 from .text import normalize_text
 
@@ -95,10 +96,25 @@ class Learny:
             self.history.add(user_message, known_response.answer)
             return known_response
 
-        generated = self._learn_answer(user_message)
+        generated = self._generate_answer(user_message)
         if generated is None:
             return LearnyResponse(answer=self.fallback, source="unknown")
 
+        if not self._should_remember(generated):
+            response = LearnyResponse(
+                answer=generated.answer,
+                source="generated",
+                learned=False,
+                model=generated.model,
+            )
+            self.history.add(user_message, response.answer)
+            return response
+
+        self.knowledge = remember_answer(
+            self.knowledge_path,
+            generated.standalone_question,
+            generated.answer,
+        )
         learned_response = self._reply_from_knowledge(
             generated.standalone_question,
             learned=True,
@@ -141,7 +157,7 @@ class Learny:
             model=model,
         )
 
-    def _learn_answer(self, user_message: str) -> GeneratedAnswer | None:
+    def _generate_answer(self, user_message: str) -> GeneratedAnswer | None:
         if self.generator is None or self.knowledge_path is None:
             return None
 
@@ -156,12 +172,14 @@ class Learny:
         ):
             return None
 
-        self.knowledge = remember_answer(
-            self.knowledge_path,
-            generated.standalone_question,
-            generated.answer,
-        )
         return generated
+
+    def _should_remember(self, generated: GeneratedAnswer) -> bool:
+        return (
+            self.knowledge_path is not None
+            and generated.should_learn
+            and is_safe_learned_question(generated.standalone_question)
+        )
 
     def _fallback_generated_answer(self, user_message: str) -> GeneratedAnswer | None:
         normalized = normalize_text(user_message)
@@ -172,4 +190,5 @@ class Learny:
             standalone_question=normalized,
             answer=answer,
             model="local-greeting",
+            should_learn=True,
         )

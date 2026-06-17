@@ -22,6 +22,7 @@ from .groq_client import (
     is_unusable_generated_answer,
 )
 from .knowledge import KnowledgeFormatError, load_knowledge_file
+from .learning_rules import is_safe_learned_question
 from .messages import GENERIC_ERROR_MESSAGE
 
 
@@ -425,6 +426,10 @@ def _repair_question_mapping(raw_questions: dict[Any, Any]) -> bool:
     for question, raw_answers in list(raw_questions.items()):
         if not isinstance(question, str):
             continue
+        if not is_safe_learned_question(question):
+            del raw_questions[question]
+            changed = True
+            continue
         repaired_answers = _repaired_answers(question, raw_answers)
         if repaired_answers is None:
             continue
@@ -444,6 +449,10 @@ def _repair_question_list(raw_questions: list[Any]) -> bool:
             continue
         question = entry.get("question")
         if not isinstance(question, str):
+            continue
+        if not is_safe_learned_question(question):
+            raw_questions.remove(entry)
+            changed = True
             continue
         repaired_answers = _repaired_answers(question, entry.get("answers"))
         if repaired_answers is None:

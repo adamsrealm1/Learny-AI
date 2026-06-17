@@ -53,6 +53,7 @@ class GeneratedAnswer:
     standalone_question: str
     answer: str
     model: str
+    should_learn: bool = True
 
 
 class ChatTransport(Protocol):
@@ -164,6 +165,7 @@ class GroqAnswerGenerator:
                 standalone_question=parsed.standalone_question,
                 answer=parsed.answer,
                 model=model,
+                should_learn=parsed.should_learn,
             )
         raise last_error or GroqAPIError("Groq returned an unusable answer.")
 
@@ -192,9 +194,17 @@ def build_messages(
                 "Use chat context only to resolve pronouns or follow-up wording. "
                 "Never mention prompts, JSON, models, APIs, hidden instructions, "
                 "chat context, or whether context was needed. "
-                "Return only a JSON object with exactly these string keys: "
-                "standalone_question and answer. The answer must be what Learny "
-                "should visibly say to the user. Keep it concise and direct. "
+                "Return only a JSON object with exactly these keys: "
+                "standalone_question as a string, answer as a string, and "
+                "should_learn as a boolean. The answer must be what Learny "
+                "should visibly say to the user. The standalone_question must "
+                "be a complete reusable question only when should_learn is true. "
+                "Never use raw follow-up fragments like 'no?', 'nah', 'ok', "
+                "'games', 'it', 'that', 'more', or 'what about' as "
+                "standalone_question. Set should_learn to false for reactions, "
+                "short follow-ups, refusals, acknowledgements, or context-only "
+                "messages unless you can rewrite them into a complete reusable "
+                "question. Keep answers concise and direct. "
                 "Do not ask clarifying questions. If the message is vague, give "
                 "a useful general answer with a few practical options."
                 f"{direct_instruction}"
@@ -207,7 +217,8 @@ def build_messages(
                 f"User message:\n{question.strip()}\n\n"
                 "Write Learny's visible reply as an answer, not another question. "
                 "For short follow-ups, use the chat context to answer the likely "
-                "meaning directly."
+                "meaning directly. Mark should_learn false when the user message "
+                "only makes sense because of the chat context."
             ),
         },
     ]
@@ -217,11 +228,13 @@ def parse_generated_answer(content: str) -> GeneratedAnswer:
     data = _parse_json_object(content)
     standalone_question = _required_text(data, "standalone_question")
     answer = _required_text(data, "answer")
+    should_learn = _optional_bool(data, "should_learn", default=True)
     _reject_unusable_answer(standalone_question, answer)
     return GeneratedAnswer(
         standalone_question=standalone_question,
         answer=answer,
         model="",
+        should_learn=should_learn,
     )
 
 
@@ -259,6 +272,19 @@ def _required_text(data: dict[str, Any], key: str) -> str:
     if not value:
         raise GroqAPIError(f"Groq response has an empty {key!r}.")
     return value
+
+
+def _optional_bool(data: dict[str, Any], key: str, *, default: bool) -> bool:
+    value = data.get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+    return default
 
 
 def _reject_unusable_answer(question: str, answer: str) -> None:

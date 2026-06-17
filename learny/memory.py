@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .knowledge import KnowledgeBase, KnowledgeFormatError, load_knowledge_file
+from .learning_rules import is_safe_learned_question
 from .text import tokenize
 
 
@@ -17,6 +18,9 @@ def remember_answer(path: str | Path, question: str, answer: str) -> KnowledgeBa
     knowledge_path = Path(path)
     question = _required_text(question, "question")
     answer = _required_text(answer, "answer")
+
+    if not is_safe_learned_question(question):
+        return load_knowledge_file(knowledge_path)
 
     with _MEMORY_LOCK:
         raw_data = _load_raw_knowledge(knowledge_path)
