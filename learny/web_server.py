@@ -273,7 +273,11 @@ def _safe_static_path(static_dir: Path, route: str) -> Path:
     route = unquote(route).replace("\\", "/").lstrip("/")
     if not route:
         route = "index.html"
-    if _uses_root_static_layout(static_dir) and route != "index.html" and not route.startswith("web/"):
+    if (
+        _uses_root_static_layout(static_dir)
+        and route != "index.html"
+        and not route.startswith(("web/", "icon_library/"))
+    ):
         raise ValueError("Static path is not part of the public web files.")
     candidate = (static_dir / route).resolve()
     static_root = static_dir.resolve()

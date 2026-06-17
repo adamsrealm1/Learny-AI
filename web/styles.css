@@ -189,6 +189,31 @@ input:focus-visible {
   place-items: center;
 }
 
+.ui-icon {
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  filter: brightness(0) invert(1);
+}
+
+.collapse-icon {
+  width: 15px;
+  height: 15px;
+  opacity: 0.82;
+}
+
+.new-chat-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.send-icon {
+  width: 16px;
+  height: 16px;
+}
+
 .sidebar-toggle {
   width: 28px;
   height: 28px;
@@ -203,6 +228,10 @@ input:focus-visible {
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
   transform: rotate(-8deg) scale(1.06);
+}
+
+.sidebar-toggle:hover .collapse-icon {
+  opacity: 1;
 }
 
 .sidebar-nav {
@@ -280,12 +309,9 @@ input:focus-visible {
 }
 
 .nav-icon {
-  color: #fff;
-  font-size: 1.02rem;
-  font-weight: 500;
-  line-height: 1;
-  text-shadow: 0 0 12px rgba(255, 255, 255, 0.36);
-  transform: translateY(-1px);
+  width: 14px;
+  height: 14px;
+  opacity: 0.96;
 }
 
 .nav-item span:last-child {
@@ -414,25 +440,15 @@ input:focus-visible {
 }
 
 .chat-search-icon {
-  position: relative;
-  width: 13px;
-  height: 13px;
-  border: 1.7px solid var(--subtle);
-  border-radius: 50%;
-  opacity: 0.86;
+  width: 14px;
+  height: 14px;
+  opacity: 0.68;
+  transition: opacity 160ms ease, transform 160ms ease;
 }
 
-.chat-search-icon::after {
-  content: "";
-  position: absolute;
-  right: -5px;
-  bottom: -4px;
-  width: 6px;
-  height: 1.7px;
-  border-radius: 999px;
-  background: var(--subtle);
-  transform: rotate(45deg);
-  transform-origin: left center;
+.chat-search:focus-within .chat-search-icon {
+  opacity: 1;
+  transform: scale(1.06);
 }
 
 .chat-search input {
@@ -855,13 +871,12 @@ input:focus-visible {
 
 .send-button {
   background: #676767;
-  color: #141414;
   font-weight: 850;
   transition: background 120ms ease, transform 120ms ease;
 }
 
 .send-button:hover {
-  background: #f4f4f4;
+  background: #7a7a7a;
 }
 
 .send-button:active {

@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI</title>
-    <link rel="stylesheet" href="./web/styles.css?v=welcomefade">
+    <link rel="stylesheet" href="./web/styles.css?v=iconlibrary">
   </head>
   <body>
     <div class="app-shell">
@@ -14,14 +14,14 @@
         <header class="sidebar-header">
           <strong>Learny AI</strong>
           <button class="sidebar-toggle" type="button" title="Collapse sidebar">
-            <span aria-hidden="true">[]</span>
+            <img class="ui-icon collapse-icon" src="./icon_library/collapse.png" alt="" aria-hidden="true">
             <span class="sr-only">Collapse sidebar</span>
           </button>
         </header>
 
         <nav class="sidebar-nav" aria-label="Main navigation">
           <button class="nav-item active" id="newChatButton" type="button">
-            <span class="nav-icon" aria-hidden="true">+</span>
+            <img class="ui-icon nav-icon" src="./icon_library/new.png" alt="" aria-hidden="true">
             <span>New chat</span>
           </button>
         </nav>
@@ -30,12 +30,12 @@
           <div class="panel-heading">
             <p>CHATS</p>
             <button class="add-chat-button" id="addChatButton" type="button" title="New chat">
-              <span aria-hidden="true">+</span>
+              <img class="ui-icon new-chat-icon" src="./icon_library/new.png" alt="" aria-hidden="true">
               <span class="sr-only">New chat</span>
             </button>
           </div>
           <label class="chat-search" for="chatSearchInput">
-            <span class="chat-search-icon" aria-hidden="true"></span>
+            <img class="ui-icon chat-search-icon" src="./icon_library/search.png" alt="" aria-hidden="true">
             <input
               id="chatSearchInput"
               type="search"
@@ -76,7 +76,7 @@
                 required
               >
               <button class="send-button" id="sendButton" type="submit" title="Send message">
-                <span aria-hidden="true">^</span>
+                <img class="ui-icon send-icon" src="./icon_library/send.png" alt="" aria-hidden="true">
                 <span class="sr-only">Send message</span>
               </button>
             </form>
