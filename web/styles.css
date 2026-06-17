@@ -15,6 +15,9 @@
   --learny-bubble: rgba(20, 20, 22, 0.86);
   --error: #ff6b6b;
   --ready: #d8d8d8;
+  --accent: #5865ff;
+  --accent-2: #6e75ff;
+  --accent-3: #3d8bff;
   --radius: 8px;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -124,10 +127,10 @@ input:focus-visible {
   z-index: 2;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
   min-height: 0;
-  padding: 10px 8px;
+  padding: 12px 10px;
   border-right: 1px solid var(--sidebar-border);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025)),
@@ -139,6 +142,7 @@ input:focus-visible {
   overflow: hidden;
   backdrop-filter: blur(34px) saturate(1.45);
   -webkit-backdrop-filter: blur(34px) saturate(1.45);
+  animation: sidebarFloat 11s ease-in-out infinite;
 }
 
 .sidebar::before {
@@ -154,6 +158,22 @@ input:focus-visible {
   opacity: 0.64;
   pointer-events: none;
   transform: translate3d(0, 0, 0);
+  animation: sidebarAura 13s ease-in-out infinite alternate;
+}
+
+.sidebar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background:
+    linear-gradient(115deg, transparent 0 18%, rgba(255, 255, 255, 0.12) 36%, transparent 54%),
+    radial-gradient(circle at 22% 0, rgba(88, 101, 255, 0.18), transparent 28%),
+    radial-gradient(circle at 100% 92%, rgba(61, 139, 255, 0.12), transparent 32%);
+  opacity: 0.38;
+  pointer-events: none;
+  transform: translate3d(-18%, 0, 0);
+  animation: sidebarSheen 8s ease-in-out infinite;
 }
 
 .sidebar > * {
@@ -167,11 +187,15 @@ input:focus-visible {
   justify-content: space-between;
   min-height: 34px;
   padding: 0 4px 2px 8px;
+  animation: sidebarItemIn 420ms ease both;
 }
 
 .sidebar-header strong {
-  font-size: 1.3rem;
-  font-weight: 700;
+  color: #f8f8ff;
+  font-size: 1.22rem;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-shadow: 0 0 24px rgba(118, 126, 255, 0.28);
 }
 
 .sidebar-toggle,
@@ -184,52 +208,106 @@ input:focus-visible {
 .sidebar-toggle {
   width: 28px;
   height: 28px;
-  border-radius: 6px;
+  border-radius: 50%;
   color: var(--muted);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
+  transition: color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
-.sidebar-toggle:hover,
-.add-chat-button:hover {
-  background: var(--hover);
+.sidebar-toggle:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  transform: rotate(-8deg) scale(1.06);
 }
 
 .sidebar-nav {
   display: grid;
-  gap: 2px;
+  gap: 8px;
+  animation: sidebarItemIn 460ms 50ms ease both;
 }
 
 .nav-item {
+  position: relative;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr);
+  grid-template-columns: 18px minmax(0, auto);
+  justify-content: center;
   align-items: center;
-  gap: 4px;
-  min-height: 34px;
-  padding: 0 9px;
-  border-radius: var(--radius);
-  background: transparent;
-  color: var(--text);
-  text-align: left;
-  transition: background 120ms ease;
+  gap: 7px;
+  min-height: 42px;
+  padding: 0 18px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, var(--accent), var(--accent-2) 52%, var(--accent-3)),
+    var(--accent);
+  color: #fff;
+  text-align: center;
+  box-shadow:
+    0 12px 32px rgba(68, 90, 255, 0.34),
+    0 2px 12px rgba(112, 117, 255, 0.2),
+    inset 0 1px rgba(255, 255, 255, 0.34);
+  overflow: hidden;
+  transform: translate3d(0, 0, 0);
+  transition:
+    box-shadow 180ms ease,
+    filter 180ms ease,
+    transform 180ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  animation: newChatPulse 3.8s ease-in-out infinite;
+}
+
+.nav-item::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(110deg, transparent 0 28%, rgba(255, 255, 255, 0.42) 46%, transparent 64%);
+  opacity: 0;
+  transform: translateX(-95%);
+  pointer-events: none;
+}
+
+.nav-item::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: inherit;
+  box-shadow: inset 0 -10px 22px rgba(35, 55, 220, 0.24);
+  pointer-events: none;
 }
 
 .nav-item:hover {
-  background: var(--hover);
+  filter: brightness(1.08) saturate(1.12);
+  box-shadow:
+    0 18px 42px rgba(68, 90, 255, 0.46),
+    0 4px 18px rgba(112, 117, 255, 0.28),
+    inset 0 1px rgba(255, 255, 255, 0.42);
+  transform: translateY(-2px) scale(1.018);
+}
+
+.nav-item:hover::before {
+  opacity: 1;
+  animation: buttonSheen 760ms ease;
 }
 
 .nav-item.active {
-  background: var(--active);
+  background:
+    linear-gradient(135deg, var(--accent), var(--accent-2) 52%, var(--accent-3)),
+    var(--accent);
 }
 
 .nav-icon {
-  color: var(--muted);
-  font-size: 0.86rem;
+  color: #fff;
+  font-size: 1.02rem;
+  font-weight: 500;
   line-height: 1;
+  text-shadow: 0 0 12px rgba(255, 255, 255, 0.36);
+  transform: translateY(-1px);
 }
 
 .nav-item span:last-child {
   overflow: hidden;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
+  font-weight: 720;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -237,9 +315,10 @@ input:focus-visible {
 .chats-panel {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  gap: 8px;
+  gap: 10px;
   min-height: 0;
-  margin-top: 8px;
+  margin-top: 6px;
+  animation: sidebarItemIn 500ms 100ms ease both;
 }
 
 .panel-heading {
@@ -247,25 +326,70 @@ input:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 8px;
+  padding: 8px 6px 2px 8px;
 }
 
 .panel-heading p {
   margin: 0;
-  color: var(--subtle);
+  color: rgba(217, 220, 255, 0.72);
   font-size: 0.72rem;
   font-weight: 650;
   text-transform: uppercase;
 }
 
 .add-chat-button {
-  width: 26px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 34px;
   height: 26px;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 1.05rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, rgba(88, 101, 255, 0.95), rgba(61, 139, 255, 0.95)),
+    var(--accent);
+  color: #fff;
+  font-size: 1rem;
   line-height: 1;
+  box-shadow:
+    0 9px 22px rgba(68, 90, 255, 0.24),
+    inset 0 1px rgba(255, 255, 255, 0.28);
+  overflow: hidden;
+  transition:
+    width 200ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    box-shadow 160ms ease,
+    transform 160ms ease,
+    filter 160ms ease;
+}
+
+.add-chat-button::after {
+  content: "New";
+  max-width: 0;
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 720;
+  opacity: 0;
+  overflow: hidden;
+  transform: translateX(-4px);
+  transition: max-width 180ms ease, opacity 150ms ease, transform 150ms ease;
+  white-space: nowrap;
+}
+
+.add-chat-button:hover {
+  width: 68px;
+  filter: brightness(1.08);
+  box-shadow:
+    0 13px 30px rgba(68, 90, 255, 0.34),
+    inset 0 1px rgba(255, 255, 255, 0.34);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.add-chat-button:hover::after {
+  max-width: 34px;
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .chat-search {
@@ -278,14 +402,19 @@ input:focus-visible {
   margin: 0 5px;
   padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
+  border-radius: 999px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.045)),
     rgba(255, 255, 255, 0.035);
   box-shadow:
     inset 0 1px rgba(255, 255, 255, 0.08),
     0 10px 30px rgba(0, 0, 0, 0.18);
-  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+  animation: sidebarItemIn 540ms 140ms ease both;
 }
 
 .chat-search:focus-within {
@@ -297,6 +426,7 @@ input:focus-visible {
     inset 0 1px rgba(255, 255, 255, 0.12),
     0 0 0 1px rgba(255, 255, 255, 0.04),
     0 12px 34px rgba(0, 0, 0, 0.22);
+  transform: translateY(-1px);
 }
 
 .chat-search-icon {
@@ -342,7 +472,7 @@ input:focus-visible {
 .chat-list {
   display: grid;
   align-content: start;
-  gap: 2px;
+  gap: 4px;
   min-height: 0;
   overflow: auto;
   padding-right: 2px;
@@ -367,15 +497,48 @@ input:focus-visible {
   grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
   gap: 4px;
-  min-height: 36px;
-  padding: 3px 4px 3px 8px;
-  border-radius: var(--radius);
+  min-height: 42px;
+  padding: 5px 4px 5px 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
   color: var(--muted);
+  overflow: hidden;
+  transform: translate3d(0, 0, 0);
+  transition:
+    border-color 170ms ease,
+    background 170ms ease,
+    box-shadow 170ms ease,
+    transform 170ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  animation: chatItemIn 360ms ease both;
+}
+
+.chat-item::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 0 50%, rgba(88, 101, 255, 0.2), transparent 46%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08), transparent);
+  opacity: 0;
+  transform: translateX(-12px);
+  transition: opacity 170ms ease, transform 170ms ease;
+  pointer-events: none;
 }
 
 .chat-item:hover,
 .chat-item.active {
-  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 12px 26px rgba(0, 0, 0, 0.2),
+    inset 0 1px rgba(255, 255, 255, 0.08);
+  transform: translateX(3px);
+}
+
+.chat-item:hover::before,
+.chat-item.active::before {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .chat-open-button {
@@ -387,6 +550,7 @@ input:focus-visible {
   background: transparent;
   color: inherit;
   text-align: left;
+  z-index: 1;
 }
 
 .chat-title {
@@ -411,12 +575,13 @@ input:focus-visible {
   place-items: center;
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  z-index: 1;
+  border-radius: 50%;
   background: transparent;
   color: var(--subtle);
   opacity: 0;
   transform: translateX(4px);
-  transition: opacity 140ms ease, transform 140ms ease, background 140ms ease, color 140ms ease;
+  transition: opacity 150ms ease, transform 150ms ease, background 150ms ease, color 150ms ease;
 }
 
 .chat-item:hover .delete-chat-button,
@@ -724,6 +889,99 @@ input:focus-visible {
 @keyframes spin {
   to {
     transform: rotate(1turn);
+  }
+}
+
+@keyframes sidebarFloat {
+  0%,
+  100% {
+    box-shadow:
+      inset -1px 0 rgba(255, 255, 255, 0.07),
+      inset 0 1px rgba(255, 255, 255, 0.08),
+      18px 0 60px rgba(0, 0, 0, 0.38);
+  }
+  50% {
+    box-shadow:
+      inset -1px 0 rgba(255, 255, 255, 0.1),
+      inset 0 1px rgba(255, 255, 255, 0.12),
+      24px 0 72px rgba(41, 55, 150, 0.24);
+  }
+}
+
+@keyframes sidebarAura {
+  0% {
+    opacity: 0.48;
+    transform: translate3d(-2%, -1%, 0) scale(1);
+  }
+  50% {
+    opacity: 0.74;
+    transform: translate3d(3%, 2%, 0) scale(1.04);
+  }
+  100% {
+    opacity: 0.56;
+    transform: translate3d(-1%, 3%, 0) scale(1.02);
+  }
+}
+
+@keyframes sidebarSheen {
+  0%,
+  28% {
+    opacity: 0.16;
+    transform: translate3d(-42%, 0, 0);
+  }
+  52% {
+    opacity: 0.42;
+  }
+  100% {
+    opacity: 0.2;
+    transform: translate3d(42%, 0, 0);
+  }
+}
+
+@keyframes sidebarItemIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes chatItemIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes newChatPulse {
+  0%,
+  100% {
+    box-shadow:
+      0 12px 32px rgba(68, 90, 255, 0.34),
+      0 2px 12px rgba(112, 117, 255, 0.2),
+      inset 0 1px rgba(255, 255, 255, 0.34);
+  }
+  50% {
+    box-shadow:
+      0 16px 42px rgba(68, 90, 255, 0.5),
+      0 4px 18px rgba(112, 117, 255, 0.3),
+      inset 0 1px rgba(255, 255, 255, 0.42);
+  }
+}
+
+@keyframes buttonSheen {
+  from {
+    transform: translateX(-95%);
+  }
+  to {
+    transform: translateX(95%);
   }
 }
 
