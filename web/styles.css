@@ -689,13 +689,16 @@ input:focus-visible {
   top: 40%;
   display: grid;
   width: min(680px, 100%);
+  opacity: 0;
   transform: translate(-50%, -50%);
   place-items: center;
   pointer-events: none;
+  animation: welcomeFadeIn 520ms ease 2s both;
   transition: opacity 160ms ease;
 }
 
 .empty-state.hidden {
+  animation: none;
   opacity: 0;
 }
 
@@ -958,6 +961,17 @@ input:focus-visible {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes welcomeFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 6px));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
   }
 }
 
