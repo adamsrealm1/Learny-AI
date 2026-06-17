@@ -6,6 +6,7 @@ const messageTemplate = document.querySelector("#messageTemplate");
 const connectionPill = document.querySelector("#connectionPill");
 const chatList = document.querySelector("#chatList");
 const addChatButton = document.querySelector("#addChatButton");
+const chatSearchInput = document.querySelector("#chatSearchInput");
 const emptyState = document.querySelector("#emptyState");
 const newChatButton = document.querySelector("#newChatButton");
 const starField = document.querySelector("#starField");
@@ -32,6 +33,7 @@ let chats = loadStoredChats();
 let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
 let sessionId = "";
 let isSending = false;
+let chatSearchQuery = "";
 
 function createId(prefix) {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -128,6 +130,26 @@ function sortedChats() {
   return [...chats].sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
+function chatMatchesSearch(chat, query) {
+  if (!query) {
+    return true;
+  }
+
+  const searchableText = [
+    chat.title,
+    ...chat.messages.map((message) => message.text),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return searchableText.includes(query);
+}
+
+function visibleChats() {
+  const query = chatSearchQuery.trim().toLowerCase();
+  return sortedChats().filter((chat) => chatMatchesSearch(chat, query));
+}
+
 function formatChatMeta(chat) {
   const count = chat.messages.filter((message) => message.speaker === "You").length;
   if (count === 0) {
@@ -202,7 +224,15 @@ function sourceLabel() {
   return "";
 }
 
+function clearChatSearch() {
+  chatSearchQuery = "";
+  if (chatSearchInput) {
+    chatSearchInput.value = "";
+  }
+}
+
 function createChat() {
+  clearChatSearch();
   const chat = {
     id: createId("chat"),
     title: "New chat",
@@ -344,7 +374,16 @@ function renderChatList() {
     return;
   }
 
-  sortedChats().forEach((chat) => {
+  const matchingChats = visibleChats();
+  if (matchingChats.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-chat-list";
+    empty.textContent = "No matching chats";
+    chatList.append(empty);
+    return;
+  }
+
+  matchingChats.forEach((chat) => {
     const item = document.createElement("article");
     item.className = "chat-item";
     if (chat.id === activeChatId) {
@@ -534,6 +573,13 @@ if (newChatButton) {
 
 if (addChatButton) {
   addChatButton.addEventListener("click", resetChat);
+}
+
+if (chatSearchInput) {
+  chatSearchInput.addEventListener("input", () => {
+    chatSearchQuery = chatSearchInput.value;
+    renderChatList();
+  });
 }
 
 createStarField();

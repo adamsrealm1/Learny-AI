@@ -24,10 +24,6 @@
             <span class="nav-icon" aria-hidden="true">+</span>
             <span>New chat</span>
           </button>
-          <button class="nav-item" type="button">
-            <span class="nav-icon" aria-hidden="true">?</span>
-            <span>Search chats</span>
-          </button>
         </nav>
 
         <section class="chats-panel" aria-label="Saved chats">
@@ -38,6 +34,16 @@
               <span class="sr-only">New chat</span>
             </button>
           </div>
+          <label class="chat-search" for="chatSearchInput">
+            <span class="chat-search-icon" aria-hidden="true"></span>
+            <input
+              id="chatSearchInput"
+              type="search"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Search chats"
+            >
+          </label>
           <div class="chat-list" id="chatList"></div>
         </section>
 

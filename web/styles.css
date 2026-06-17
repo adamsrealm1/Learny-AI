@@ -236,7 +236,8 @@ input:focus-visible {
 
 .chats-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 8px;
   min-height: 0;
   margin-top: 8px;
 }
@@ -265,6 +266,77 @@ input:focus-visible {
   color: var(--muted);
   font-size: 1.05rem;
   line-height: 1;
+}
+
+.chat-search {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  margin: 0 5px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.045)),
+    rgba(255, 255, 255, 0.035);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.08),
+    0 10px 30px rgba(0, 0, 0, 0.18);
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+.chat-search:focus-within {
+  border-color: rgba(255, 255, 255, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06)),
+    rgba(255, 255, 255, 0.055);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 12px 34px rgba(0, 0, 0, 0.22);
+}
+
+.chat-search-icon {
+  position: relative;
+  width: 13px;
+  height: 13px;
+  border: 1.7px solid var(--subtle);
+  border-radius: 50%;
+  opacity: 0.86;
+}
+
+.chat-search-icon::after {
+  content: "";
+  position: absolute;
+  right: -5px;
+  bottom: -4px;
+  width: 6px;
+  height: 1.7px;
+  border-radius: 999px;
+  background: var(--subtle);
+  transform: rotate(45deg);
+  transform-origin: left center;
+}
+
+.chat-search input {
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.chat-search input::placeholder {
+  color: rgba(180, 180, 180, 0.68);
+}
+
+.chat-search input::-webkit-search-cancel-button {
+  appearance: none;
 }
 
 .chat-list {
