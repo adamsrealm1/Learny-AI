@@ -63,7 +63,7 @@ class FailingTransport:
         raise GroqAPIError("network down")
 
 
-class UnusableTransport:
+class QuestionTransport:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
@@ -102,23 +102,47 @@ class LearnyGroqOnlyTests(unittest.TestCase):
         self.assertIsNone(generator.generate("why is the sky blue", ConversationHistory()))
         self.assertEqual(transport.calls, list(EXPECTED_MODELS))
 
-    def test_unusable_answers_have_finite_direct_retry(self) -> None:
-        transport = UnusableTransport()
+    def test_model_questions_are_allowed(self) -> None:
+        transport = QuestionTransport()
         generator = GroqAnswerGenerator(transport)
 
-        self.assertIsNone(generator.generate("games", ConversationHistory()))
-        self.assertEqual(len(transport.calls), len(EXPECTED_MODELS) * 2)
+        response = generator.generate("games", ConversationHistory())
+
+        self.assertEqual(
+            response,
+            GeneratedAnswer(answer="What kind of games?", model=PRIMARY_GROQ_MODEL),
+        )
+        self.assertEqual(transport.calls, [PRIMARY_GROQ_MODEL])
 
     def test_groq_payload_uses_plain_answer_mode(self) -> None:
         transport = CapturingTransport()
         generator = GroqAnswerGenerator(transport)
+        history = ConversationHistory()
+        history.add("who are you", "I'm Learny.")
 
-        response = generator.generate("hello", ConversationHistory())
+        response = generator.generate("hello", history)
 
         self.assertEqual(response, GeneratedAnswer(answer="Hello from Groq.", model=PRIMARY_GROQ_MODEL))
         self.assertIsNotNone(transport.payload)
         assert transport.payload is not None
         self.assertEqual(transport.payload["model"], PRIMARY_GROQ_MODEL)
+        self.assertEqual(
+            transport.payload["messages"],
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Learny, a natural AI assistant. Use the conversation "
+                        "when it helps with follow-ups. Return only the text Learny "
+                        "should visibly say to the user. Keep answers concise by "
+                        "default, but include enough detail to be useful."
+                    ),
+                },
+                {"role": "user", "content": "who are you"},
+                {"role": "assistant", "content": "I'm Learny."},
+                {"role": "user", "content": "hello"},
+            ],
+        )
 
     def test_reasoning_tags_are_removed_from_visible_answer(self) -> None:
         answer = parse_generated_answer("hello", "<think>private notes</think>Hi there.")

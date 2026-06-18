@@ -8,7 +8,6 @@ const chatList = document.querySelector("#chatList");
 const addChatButton = document.querySelector("#addChatButton");
 const chatSearchInput = document.querySelector("#chatSearchInput");
 const emptyState = document.querySelector("#emptyState");
-const newChatButton = document.querySelector("#newChatButton");
 const starField = document.querySelector("#starField");
 const appShell = document.querySelector(".app-shell");
 const sidebarToggle = document.querySelector(".sidebar-toggle");
@@ -26,9 +25,10 @@ const CHECK_ICON_PATH = "./icon_library/check.png";
 const COPY_RESET_DELAY_MS = 1400;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
-const WELCOME_TEXTS = ["Hey! I'm Learny!", "What's on your mind"];
-const WELCOME_SWAP_INTERVAL_MS = 3000;
-const WELCOME_SWAP_FADE_MS = 260;
+const WORD_REVEAL_FOOTER_DELAY_MS = 1500;
+const WELCOME_TEXTS = ["Hey! I'm Learny!", "What's on your mind?"];
+const WELCOME_SWAP_INTERVAL_MS = 8000;
+const WELCOME_SWAP_FADE_MS = 820;
 const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_CHECK_INTERVAL_MS = 15000;
@@ -173,6 +173,13 @@ function animateWords(container) {
   });
 
   return wordIndex;
+}
+
+function wordRevealDuration(wordCount) {
+  if (!Number.isFinite(wordCount) || wordCount <= 0) {
+    return 0;
+  }
+  return (wordCount - 1) * WORD_REVEAL_STEP_MS + WORD_REVEAL_DURATION_MS;
 }
 
 async function copyTextToClipboard(text) {
@@ -352,6 +359,32 @@ function setSidebarOpen(open) {
   }
 }
 
+function setDesktopSidebarCollapsed(collapsed) {
+  if (!appShell) {
+    return;
+  }
+
+  const shouldCollapse = Boolean(collapsed && !isMobileSidebarLayout());
+  appShell.classList.toggle("sidebar-collapsed", shouldCollapse);
+  if (sidebarToggle) {
+    sidebarToggle.setAttribute("aria-expanded", String(!shouldCollapse));
+    sidebarToggle.title = shouldCollapse ? "Expand sidebar" : "Collapse sidebar";
+    const label = sidebarToggle.querySelector(".sr-only");
+    if (label) {
+      label.textContent = shouldCollapse ? "Expand sidebar" : "Collapse sidebar";
+    }
+  }
+}
+
+function toggleSidebarControl() {
+  if (isMobileSidebarLayout()) {
+    setSidebarOpen(false);
+    return;
+  }
+
+  setDesktopSidebarCollapsed(!appShell.classList.contains("sidebar-collapsed"));
+}
+
 function closeSidebarOnMobile() {
   if (isMobileSidebarLayout()) {
     setSidebarOpen(false);
@@ -359,7 +392,9 @@ function closeSidebarOnMobile() {
 }
 
 function syncSidebarForViewport() {
-  if (!isMobileSidebarLayout()) {
+  if (isMobileSidebarLayout()) {
+    setDesktopSidebarCollapsed(false);
+  } else {
     setSidebarOpen(false);
   }
 }
@@ -617,8 +652,19 @@ function displayMessage(
   const textNode = document.createElement("div");
   textNode.className = "bubble-text markdown-body";
   textNode.innerHTML = renderMessageHtml(text);
+  let revealDuration = 0;
   if (shouldAnimateWords && speaker === "Learny") {
-    animateWords(textNode);
+    const wordCount = animateWords(textNode);
+    revealDuration = wordRevealDuration(wordCount);
+    node.classList.add("word-revealing");
+    node.style.setProperty("--bubble-reveal-duration", `${Math.max(revealDuration, 420)}ms`);
+    node.style.setProperty(
+      "--footer-reveal-delay",
+      `${revealDuration + WORD_REVEAL_FOOTER_DELAY_MS}ms`,
+    );
+    window.setTimeout(() => {
+      node.classList.add("reveal-complete");
+    }, revealDuration + WORD_REVEAL_FOOTER_DELAY_MS);
   }
   bubble.replaceChildren(textNode);
 
@@ -1018,10 +1064,6 @@ chatForm.addEventListener("submit", (event) => {
   askLearny(message);
 });
 
-if (newChatButton) {
-  newChatButton.addEventListener("click", resetChat);
-}
-
 if (addChatButton) {
   addChatButton.addEventListener("click", resetChat);
 }
@@ -1063,11 +1105,8 @@ if (sidebarScrim) {
 
 if (sidebarToggle) {
   sidebarToggle.setAttribute("aria-controls", "sidebar");
-  sidebarToggle.addEventListener("click", () => {
-    if (isMobileSidebarLayout()) {
-      setSidebarOpen(false);
-    }
-  });
+  sidebarToggle.setAttribute("aria-expanded", "true");
+  sidebarToggle.addEventListener("click", toggleSidebarControl);
 }
 
 if (mobileSidebarMedia) {

@@ -32,24 +32,6 @@ META_ANSWER_MARKERS = (
     "system prompt",
     "hidden instructions",
 )
-CLARIFYING_ANSWER_PATTERNS = (
-    "can you clarify",
-    "could you clarify",
-    "please clarify",
-    "what do you mean",
-    "what would you like",
-    "what do you want",
-    "what kind of",
-    "what type of",
-    "which kind of",
-    "which type of",
-    "tell me more",
-    "i need more information",
-    "i need a little more",
-    "i need some more",
-)
-GREETING_PHRASES = {"hi", "hello", "hey"}
-
 
 class GroqAPIError(RuntimeError):
     """Raised when a Groq API request fails or returns an unusable response."""
@@ -149,64 +131,35 @@ class GroqAnswerGenerator:
         question: str,
         history: ConversationHistory,
     ) -> GeneratedAnswer:
-        last_error: GroqAPIError | None = None
-        for force_direct in (False, True):
-            payload = {
-                "model": model,
-                "messages": build_messages(question, history, force_direct=force_direct),
-                "temperature": 0.35,
-                "max_completion_tokens": 700,
-            }
-            content = self.transport.send_chat_completion(payload, self.timeout)
-            try:
-                answer = parse_generated_answer(question, content)
-            except GroqAPIError as error:
-                last_error = error
-                if "unusable answer" in str(error) and not force_direct:
-                    continue
-                raise
-            return GeneratedAnswer(answer=answer, model=model)
-        raise last_error or GroqAPIError("Groq returned an unusable answer.")
+        payload = {
+            "model": model,
+            "messages": build_messages(question, history),
+            "temperature": 0.35,
+            "max_completion_tokens": 9000,
+        }
+        content = self.transport.send_chat_completion(payload, self.timeout)
+        answer = parse_generated_answer(question, content)
+        return GeneratedAnswer(answer=answer, model=model)
 
 
-def build_messages(
-    question: str,
-    history: ConversationHistory,
-    *,
-    force_direct: bool = False,
-) -> list[dict[str, str]]:
-    direct_instruction = ""
-    if force_direct:
-        direct_instruction = (
-            "\n\nYour previous reply was not usable. Answer directly this time. "
-            "Do not ask a clarification question. If the user is vague, give a "
-            "short useful answer with practical options."
-        )
-
-    return [
+def build_messages(question: str, history: ConversationHistory) -> list[dict[str, str]]:
+    messages = [
         {
             "role": "system",
             "content": (
-                "You are Learny, a fast, direct, natural AI assistant. "
-                "Answer the user's message using the recent conversation when it "
-                "helps with follow-ups. Never mention prompts, models, APIs, "
-                "hidden instructions, or internal context. Return only the text "
-                "Learny should visibly say to the user. Keep answers concise by "
-                "default, but include enough detail to be useful. "
-                "Do not ask clarifying questions; make a reasonable assumption "
-                "and answer directly."
-                f"{direct_instruction}"
-            ),
-        },
-        {
-            "role": "user",
-            "content": (
-                f"Recent conversation:\n{history.to_prompt()}\n\n"
-                f"User message:\n{question.strip()}\n\n"
-                "Write Learny's reply now."
+                "You are Learny, a helpful and friendly AI assistant on a website called Learny AI."
+                "Keep answers as short but accurate as possible."
+                "Never use tables."
             ),
         },
     ]
+
+    for turn in history.recent():
+        messages.append({"role": "user", "content": turn.user})
+        messages.append({"role": "assistant", "content": turn.learny})
+
+    messages.append({"role": "user", "content": question.strip()})
+    return messages
 
 
 def parse_generated_answer(question: str, content: str) -> str:
@@ -241,16 +194,7 @@ def is_prompt_meta_answer(answer: str) -> bool:
 def is_unusable_generated_answer(question: str, answer: str) -> bool:
     normalized_question = _normalize_for_comparison(question)
     normalized_answer = _normalize_for_comparison(answer)
-    if (
-        normalized_question in GREETING_PHRASES
-        and normalized_answer in GREETING_PHRASES
-    ):
-        return False
-    if normalized_question and normalized_question == normalized_answer:
-        return True
-
-    lowered_answer = answer.strip().casefold()
-    return any(pattern in lowered_answer for pattern in CLARIFYING_ANSWER_PATTERNS)
+    return bool(normalized_question and normalized_question == normalized_answer)
 
 
 def _normalize_for_comparison(text: str) -> str:
