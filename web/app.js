@@ -18,6 +18,27 @@ const messageSearchCount = document.querySelector("#messageSearchCount");
 const welcomeHeading = document.querySelector("#welcomeHeading");
 const accountButton = document.querySelector("#accountButton");
 const accountStatusText = document.querySelector("#accountStatusText");
+const accountModal = document.querySelector("#accountModal");
+const accountModalBackdrop = document.querySelector("#accountModalBackdrop");
+const accountModalClose = document.querySelector("#accountModalClose");
+const accountModalTitle = document.querySelector("#accountModalTitle");
+const accountModalSubtitle = document.querySelector("#accountModalSubtitle");
+const accountModalViews = document.querySelectorAll("[data-account-view]");
+const signInForm = document.querySelector("#signInForm");
+const createAccountForm = document.querySelector("#createAccountForm");
+const signInMessage = document.querySelector("#signInMessage");
+const createAccountMessage = document.querySelector("#createAccountMessage");
+const accountAvatarLarge = document.querySelector("#accountAvatarLarge");
+const accountModalUsername = document.querySelector("#accountModalUsername");
+const accountModalCreated = document.querySelector("#accountModalCreated");
+const accountChatCount = document.querySelector("#accountChatCount");
+const accountMessageCount = document.querySelector("#accountMessageCount");
+const accountSessionCount = document.querySelector("#accountSessionCount");
+const accountSignOutButton = document.querySelector("#accountSignOutButton");
+const accountDeleteButton = document.querySelector("#accountDeleteButton");
+const accountDeleteConfirm = document.querySelector("#accountDeleteConfirm");
+const accountDeleteCancel = document.querySelector("#accountDeleteCancel");
+const accountDeleteConfirmButton = document.querySelector("#accountDeleteConfirmButton");
 
 const CHATS_KEY = "learny-chats";
 const ACTIVE_CHAT_KEY = "learny-active-chat-id";
@@ -42,6 +63,19 @@ const ASK_RETRY_MAX_ATTEMPTS = 4;
 const ASK_RETRY_MAX_ELAPSED_MS = 65000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
+const ACCOUNT_ROUTE_TO_VIEW = {
+  "/myaccount": "myaccount",
+  "/myaccount/": "myaccount",
+  "/sign-in": "sign-in",
+  "/sign-in/": "sign-in",
+  "/create-account": "create-account",
+  "/create-account/": "create-account",
+};
+const ACCOUNT_VIEW_TO_ROUTE = {
+  myaccount: "/myaccount",
+  "sign-in": "/sign-in",
+  "create-account": "/create-account",
+};
 const API_BASE_CANDIDATES = [
   "",
   "https://learny-ai-adamsrealm1.wasmer.app",
@@ -70,8 +104,10 @@ let welcomeTextIndex = 0;
 let welcomeTimeoutId = null;
 let welcomeSequenceStarted = false;
 let currentAccount = null;
+let currentAccountStats = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
+let activeAccountView = "";
 const mobileSidebarMedia = window.matchMedia
   ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
   : null;
@@ -516,6 +552,225 @@ function updateAccountButton() {
   accountStatusText.textContent = "Sign in to sync";
 }
 
+function accountInitial(username) {
+  return String(username || "L").trim().slice(0, 1).toUpperCase() || "L";
+}
+
+function formatAccountDate(timestamp) {
+  const date = new Date(Number(timestamp));
+  if (Number.isNaN(date.getTime())) {
+    return "Account ready";
+  }
+  return `Created ${date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  })}`;
+}
+
+function accountViewFromPath() {
+  return ACCOUNT_ROUTE_TO_VIEW[window.location.pathname] || "";
+}
+
+function setAccountRoute(view, replace = false) {
+  const route = ACCOUNT_VIEW_TO_ROUTE[view];
+  if (!route || DIRECT_FILE_MODE || window.location.pathname === route) {
+    return;
+  }
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method]({}, "", route);
+}
+
+function restoreChatRoute(replace = false) {
+  if (!accountViewFromPath() || DIRECT_FILE_MODE) {
+    return;
+  }
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method]({}, "", "/");
+}
+
+function setAccountFormMessage(node, text = "", isError = false) {
+  if (!node) {
+    return;
+  }
+  node.textContent = text;
+  node.classList.toggle("error", isError);
+}
+
+function setAuthFormBusy(form, busy) {
+  if (!form) {
+    return;
+  }
+
+  form.querySelectorAll("input, button").forEach((field) => {
+    field.disabled = busy;
+  });
+
+  const button = form.querySelector("button[type='submit']");
+  if (!button) {
+    return;
+  }
+  if (!button.dataset.originalText) {
+    button.dataset.originalText = button.textContent;
+  }
+  button.textContent = busy ? "Working..." : button.dataset.originalText;
+}
+
+function resetDeleteConfirmation() {
+  if (accountDeleteConfirm) {
+    accountDeleteConfirm.hidden = true;
+  }
+}
+
+function renderAccountModalDetails() {
+  if (!currentAccount) {
+    return;
+  }
+
+  if (accountAvatarLarge) {
+    accountAvatarLarge.textContent = accountInitial(currentAccount.username);
+  }
+  if (accountModalUsername) {
+    accountModalUsername.textContent = currentAccount.username;
+  }
+  if (accountModalCreated) {
+    accountModalCreated.textContent = formatAccountDate(currentAccount.createdAt);
+  }
+  if (accountChatCount) {
+    accountChatCount.textContent = String((currentAccountStats && currentAccountStats.chats) || 0);
+  }
+  if (accountMessageCount) {
+    accountMessageCount.textContent = String((currentAccountStats && currentAccountStats.messages) || 0);
+  }
+  if (accountSessionCount) {
+    accountSessionCount.textContent = String((currentAccountStats && currentAccountStats.sessions) || 0);
+  }
+}
+
+function setAccountModalCopy(view) {
+  if (!accountModalTitle || !accountModalSubtitle) {
+    return;
+  }
+
+  if (view === "create-account") {
+    accountModalTitle.textContent = "Create account";
+    accountModalSubtitle.textContent = "Start syncing Learny chats with the local SQLite database.";
+    return;
+  }
+  if (view === "myaccount" && currentAccount) {
+    accountModalTitle.textContent = "My account";
+    accountModalSubtitle.textContent = "Settings, sessions, and synced chat memory.";
+    return;
+  }
+
+  accountModalTitle.textContent = "Sign in";
+  accountModalSubtitle.textContent = "Connect Learny to your saved chats and settings.";
+}
+
+function showAccountView(view) {
+  let nextView = view;
+  if (nextView === "myaccount" && !currentAccount) {
+    nextView = "sign-in";
+  }
+  if (!["sign-in", "create-account", "myaccount"].includes(nextView)) {
+    nextView = currentAccount ? "myaccount" : "sign-in";
+  }
+
+  activeAccountView = nextView;
+  resetDeleteConfirmation();
+  setAccountFormMessage(signInMessage);
+  setAccountFormMessage(createAccountMessage);
+
+  accountModalViews.forEach((node) => {
+    node.hidden = node.dataset.accountView !== nextView;
+  });
+  setAccountModalCopy(nextView);
+  if (nextView === "myaccount") {
+    renderAccountModalDetails();
+  }
+}
+
+async function refreshAccountModalDetails() {
+  if (!currentAccount || DIRECT_FILE_MODE) {
+    renderAccountModalDetails();
+    return;
+  }
+
+  try {
+    const data = await apiFetch(
+      "/api/account",
+      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    if (data.authenticated && data.account) {
+      currentAccount = data.account;
+      currentAccountStats = data.stats || null;
+      updateAccountButton();
+    }
+  } catch (error) {
+    setConnection("offline", "Servers offline");
+  }
+  renderAccountModalDetails();
+}
+
+function openAccountModal(view = currentAccount ? "myaccount" : "sign-in", { updateRoute = true } = {}) {
+  if (!accountModal) {
+    return;
+  }
+
+  closeSidebarOnMobile();
+  accountModal.hidden = false;
+  document.body.classList.add("account-modal-open");
+  showAccountView(view);
+  if (updateRoute) {
+    setAccountRoute(activeAccountView);
+  }
+  window.setTimeout(() => {
+    const firstInput = accountModal.querySelector("[data-account-view]:not([hidden]) input");
+    const closeButton = accountModalClose;
+    if (firstInput instanceof HTMLElement) {
+      firstInput.focus();
+    } else if (closeButton) {
+      closeButton.focus();
+    }
+  }, 80);
+  if (activeAccountView === "myaccount") {
+    refreshAccountModalDetails();
+  }
+}
+
+function closeAccountModal({ updateRoute = true } = {}) {
+  if (!accountModal || accountModal.hidden) {
+    return;
+  }
+
+  accountModal.hidden = true;
+  document.body.classList.remove("account-modal-open");
+  activeAccountView = "";
+  resetDeleteConfirmation();
+  if (updateRoute) {
+    restoreChatRoute();
+  }
+  if (messageInput && !DIRECT_FILE_MODE) {
+    messageInput.focus();
+  }
+}
+
+function clearSignedInLocalState() {
+  currentAccount = null;
+  currentAccountStats = null;
+  serverChatsLoaded = false;
+  chats = [];
+  activeChatId = "";
+  sessionId = "";
+  localStorage.removeItem(ACTIVE_CHAT_KEY);
+  localStorage.removeItem(SESSION_KEY);
+  localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
+  updateAccountButton();
+  renderChatList();
+  renderActiveChat();
+}
+
 function normalizeServerChats(serverChats) {
   if (!Array.isArray(serverChats)) {
     return [];
@@ -589,7 +844,7 @@ async function syncChatsToServer() {
 async function loadAccountAndChats() {
   updateAccountButton();
   if (DIRECT_FILE_MODE) {
-    return;
+    return null;
   }
 
   try {
@@ -600,12 +855,14 @@ async function loadAccountAndChats() {
     );
     if (!accountData.authenticated || !accountData.account) {
       currentAccount = null;
+      currentAccountStats = null;
       serverChatsLoaded = false;
       updateAccountButton();
-      return;
+      return accountData;
     }
 
     currentAccount = accountData.account;
+    currentAccountStats = accountData.stats || null;
     updateAccountButton();
 
     const chatData = await apiFetch(
@@ -630,16 +887,19 @@ async function loadAccountAndChats() {
       }
       renderChatList();
       renderActiveChat();
-      return;
+      return accountData;
     }
 
     if (chats.length > 0) {
       queueServerChatSync();
     }
+    return accountData;
   } catch (error) {
     currentAccount = null;
+    currentAccountStats = null;
     serverChatsLoaded = false;
     updateAccountButton();
+    return null;
   }
 }
 
@@ -1265,6 +1525,111 @@ async function askLearny(message) {
   }
 }
 
+async function handleAccountAuthSubmit(form, messageNode, endpoint) {
+  if (!form) {
+    return;
+  }
+
+  const formData = new FormData(form);
+  const username = String(formData.get("username") || "").trim();
+  const password = String(formData.get("password") || "");
+  if (!username || !password) {
+    setAccountFormMessage(messageNode, GENERIC_ERROR_MESSAGE, true);
+    return;
+  }
+
+  setAuthFormBusy(form, true);
+  setAccountFormMessage(messageNode);
+  try {
+    const data = await apiFetch(
+      endpoint,
+      {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+        timeoutMs: STATUS_FETCH_TIMEOUT_MS,
+      },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    if (!data.authenticated || !data.account) {
+      throw new Error(GENERIC_ERROR_MESSAGE);
+    }
+    currentAccount = data.account;
+    currentAccountStats = data.stats || null;
+    form.reset();
+    await loadAccountAndChats();
+    openAccountModal("myaccount");
+  } catch (error) {
+    setAccountFormMessage(messageNode, GENERIC_ERROR_MESSAGE, true);
+  } finally {
+    setAuthFormBusy(form, false);
+  }
+}
+
+async function handleAccountSignOut() {
+  if (!accountSignOutButton) {
+    return;
+  }
+
+  accountSignOutButton.disabled = true;
+  accountSignOutButton.textContent = "Signing out...";
+  try {
+    await apiFetch(
+      "/api/accounts/sign-out",
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeoutMs: STATUS_FETCH_TIMEOUT_MS,
+      },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+  } catch (error) {
+    setConnection("offline", "Servers offline");
+  } finally {
+    clearSignedInLocalState();
+    accountSignOutButton.disabled = false;
+    accountSignOutButton.textContent = "Sign out";
+    openAccountModal("sign-in");
+  }
+}
+
+async function handleAccountDelete() {
+  if (!accountDeleteConfirmButton) {
+    return;
+  }
+
+  accountDeleteConfirmButton.disabled = true;
+  accountDeleteConfirmButton.textContent = "Deleting...";
+  try {
+    const data = await apiFetch(
+      "/api/accounts/delete",
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeoutMs: STATUS_FETCH_TIMEOUT_MS,
+      },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    if (!data.deleted) {
+      throw new Error(GENERIC_ERROR_MESSAGE);
+    }
+    clearSignedInLocalState();
+    openAccountModal("sign-in");
+  } catch (error) {
+    setConnection("offline", "Servers offline");
+  } finally {
+    accountDeleteConfirmButton.disabled = false;
+    accountDeleteConfirmButton.textContent = "Delete forever";
+  }
+}
+
+function openInitialAccountRoute() {
+  const view = accountViewFromPath();
+  if (!view) {
+    return;
+  }
+  openAccountModal(view, { updateRoute: false });
+}
+
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (isSending) {
@@ -1281,6 +1646,61 @@ chatForm.addEventListener("submit", (event) => {
 
 if (addChatButton) {
   addChatButton.addEventListener("click", resetChat);
+}
+
+if (accountButton) {
+  accountButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    openAccountModal(currentAccount ? "myaccount" : "sign-in");
+  });
+}
+
+document.querySelectorAll("[data-open-account-view]").forEach((button) => {
+  button.addEventListener("click", () => {
+    openAccountModal(button.dataset.openAccountView || "sign-in");
+  });
+});
+
+if (accountModalBackdrop) {
+  accountModalBackdrop.addEventListener("click", () => closeAccountModal());
+}
+
+if (accountModalClose) {
+  accountModalClose.addEventListener("click", () => closeAccountModal());
+}
+
+if (signInForm) {
+  signInForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleAccountAuthSubmit(signInForm, signInMessage, "/api/accounts/sign-in");
+  });
+}
+
+if (createAccountForm) {
+  createAccountForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    handleAccountAuthSubmit(createAccountForm, createAccountMessage, "/api/accounts/create");
+  });
+}
+
+if (accountSignOutButton) {
+  accountSignOutButton.addEventListener("click", handleAccountSignOut);
+}
+
+if (accountDeleteButton) {
+  accountDeleteButton.addEventListener("click", () => {
+    if (accountDeleteConfirm) {
+      accountDeleteConfirm.hidden = false;
+    }
+  });
+}
+
+if (accountDeleteCancel) {
+  accountDeleteCancel.addEventListener("click", resetDeleteConfirmation);
+}
+
+if (accountDeleteConfirmButton) {
+  accountDeleteConfirmButton.addEventListener("click", handleAccountDelete);
 }
 
 if (chatSearchInput) {
@@ -1334,7 +1754,20 @@ if (mobileSidebarMedia) {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (accountModal && !accountModal.hidden) {
+      closeAccountModal();
+      return;
+    }
     setSidebarOpen(false);
+  }
+});
+
+window.addEventListener("popstate", () => {
+  const view = accountViewFromPath();
+  if (view) {
+    openAccountModal(view, { updateRoute: false });
+  } else {
+    closeAccountModal({ updateRoute: false });
   }
 });
 
@@ -1372,7 +1805,16 @@ if (DIRECT_FILE_MODE) {
   renderActiveChat();
 }
 
-loadAccountAndChats();
+openInitialAccountRoute();
+loadAccountAndChats().then(() => {
+  const view = accountViewFromPath();
+  if (view && accountModal && !accountModal.hidden) {
+    showAccountView(view);
+    if (activeAccountView === "myaccount") {
+      refreshAccountModalDetails();
+    }
+  }
+});
 loadStatus();
 if (!DIRECT_FILE_MODE) {
   window.setInterval(loadStatus, STATUS_CHECK_INTERVAL_MS);

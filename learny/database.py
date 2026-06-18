@@ -192,6 +192,10 @@ class LearnyDatabase:
                 (_hash_token(token),),
             )
 
+    def delete_account(self, account_id: int) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+
     def get_account_for_session(self, token: str | None) -> dict[str, Any] | None:
         if not token:
             return None

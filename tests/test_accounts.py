@@ -109,15 +109,44 @@ class AccountWebTests(unittest.TestCase):
             ["You", "Learny", "You", "Learny"],
         )
 
-    def test_account_pages_are_served_from_extensionless_routes(self) -> None:
+    def test_delete_account_removes_session_and_saved_chats(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "delete_user", "password": "strong-password"},
+            )
+            server.post_json(
+                "/api/chats/sync",
+                {
+                    "chats": [
+                        {
+                            "id": "chat-delete",
+                            "title": "Delete me",
+                            "sessionId": "session-delete",
+                            "messages": [{"speaker": "You", "text": "remove this"}],
+                        }
+                    ]
+                },
+            )
+            deleted = server.post_json("/api/accounts/delete", {})
+            account = server.get_json("/api/account")
+            unauthorized = server.get_status("/api/chats")
+
+        self.assertTrue(deleted["deleted"])
+        self.assertFalse(account["authenticated"])
+        self.assertEqual(unauthorized, 401)
+
+    def test_account_routes_serve_main_app_popup_shell(self) -> None:
         with run_account_server() as server:
             my_account = server.get_text("/myaccount")
             sign_in = server.get_text("/sign-in")
             create_account = server.get_text("/create-account")
 
-        self.assertIn("Learny Account", my_account)
-        self.assertIn("Sign in", sign_in)
-        self.assertIn("Create account", create_account)
+        for html in (my_account, sign_in, create_account):
+            self.assertIn('id="accountModal"', html)
+            self.assertIn('data-account-view="sign-in"', html)
+            self.assertIn('data-account-view="create-account"', html)
+            self.assertIn('data-account-view="myaccount"', html)
 
 
 class run_account_server:
@@ -131,12 +160,17 @@ class run_account_server:
 
     def __enter__(self) -> "run_account_server":
         root = Path(self.temp_dir.name)
-        accounts_root = root / "accounts"
-        accounts_root.mkdir()
-        (root / "index.html").write_text("Learny", encoding="utf-8")
-        (accounts_root / "myaccount.html").write_text("Learny Account", encoding="utf-8")
-        (accounts_root / "sign-in.html").write_text("Sign in", encoding="utf-8")
-        (accounts_root / "create-account.html").write_text("Create account", encoding="utf-8")
+        (root / "index.html").write_text(
+            """
+            <main>Learny</main>
+            <div id="accountModal">
+              <div data-account-view="sign-in"></div>
+              <div data-account-view="create-account"></div>
+              <div data-account-view="myaccount"></div>
+            </div>
+            """,
+            encoding="utf-8",
+        )
         config = WebServerConfig(
             static_dir=root,
             generator_factory=StaticAnswerGenerator,
@@ -174,6 +208,16 @@ class run_account_server:
     def get_text(self, path: str) -> str:
         with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:
             return response.read().decode("utf-8")
+
+    def get_status(self, path: str) -> int:
+        try:
+            with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:
+                return int(response.status)
+        except urllib.error.HTTPError as error:
+            try:
+                return int(error.code)
+            finally:
+                error.close()
 
 
 if __name__ == "__main__":

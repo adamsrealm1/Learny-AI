@@ -35,12 +35,12 @@ DEFAULT_STATIC_ROOT = PROJECT_ROOT
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 ACCOUNT_SESSION_COOKIE = "learny_account"
 ACCOUNT_ROUTE_FILES = {
-    "/myaccount": "accounts/myaccount.html",
-    "/myaccount/": "accounts/myaccount.html",
-    "/sign-in": "accounts/sign-in.html",
-    "/sign-in/": "accounts/sign-in.html",
-    "/create-account": "accounts/create-account.html",
-    "/create-account/": "accounts/create-account.html",
+    "/myaccount": "index.html",
+    "/myaccount/": "index.html",
+    "/sign-in": "index.html",
+    "/sign-in/": "index.html",
+    "/create-account": "index.html",
+    "/create-account/": "index.html",
 }
 PUBLIC_ROOT_FILES = {
     "index.html",
@@ -109,6 +109,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 return
             if route == "/api/accounts/sign-out":
                 self._handle_sign_out()
+                return
+            if route == "/api/accounts/delete":
+                self._handle_delete_account()
                 return
             if route == "/api/chats/sync":
                 self._handle_sync_chats()
@@ -209,6 +212,18 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             database.delete_session(self._account_session_token())
             self._send_json(
                 {"authenticated": False, "account": None, "stats": None},
+                extra_headers=[_clear_account_cookie_header()],
+            )
+
+        def _handle_delete_account(self) -> None:
+            account = self._current_account()
+            if account is None:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+
+            database.delete_account(int(account["id"]))
+            self._send_json(
+                {"deleted": True, "authenticated": False, "account": None, "stats": None},
                 extra_headers=[_clear_account_cookie_header()],
             )
 
@@ -458,7 +473,7 @@ def _safe_static_path(static_dir: Path, route: str) -> Path:
     if (
         _uses_root_static_layout(static_dir)
         and route not in PUBLIC_ROOT_FILES
-        and not route.startswith(("web/", "icon_library/", "accounts/"))
+        and not route.startswith(("web/", "icon_library/"))
     ):
         raise ValueError("Static path is not part of the public web files.")
     candidate = (static_dir / route).resolve()
