@@ -158,6 +158,19 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(headers["origin"], "https://learny.env.pm")
         self.assertEqual(headers["credentials"], ["true"])
 
+    def test_cross_site_account_cookie_uses_secure_none_samesite(self) -> None:
+        with run_account_server() as server:
+            headers = server.post_json_headers(
+                "/api/accounts/create",
+                {"username": "cross_site_user", "password": "strong-password"},
+                {"Origin": "https://learny.env.pm"},
+            )
+
+        cookies = headers.get_all("Set-Cookie")
+        self.assertEqual(len(cookies), 1)
+        self.assertIn("SameSite=None", cookies[0])
+        self.assertIn("Secure", cookies[0])
+
 
 class run_account_server:
     def __init__(self) -> None:
@@ -214,6 +227,23 @@ class run_account_server:
         )
         with self.opener.open(request, timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def post_json_headers(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        request_headers = {"Content-Type": "application/json", **(headers or {})}
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=request_headers,
+            method="POST",
+        )
+        with self.opener.open(request, timeout=10) as response:
+            response.read()
+            return response.headers
 
     def get_text(self, path: str) -> str:
         with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:

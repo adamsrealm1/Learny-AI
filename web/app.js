@@ -64,10 +64,8 @@ const ASK_RETRY_MAX_ATTEMPTS = 4;
 const ASK_RETRY_MAX_ELAPSED_MS = 65000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
-const API_BASE_CANDIDATES = [
-  "",
-  "https://learny-ai.wasmer.app",
-];
+const WASMER_API_BASE = "https://learny-ai-adamsrealm1.wasmer.app";
+const API_BASE_CANDIDATES = buildApiBaseCandidates();
 const DESKTOP_STAR_COUNT = 360;
 const MOBILE_STAR_COUNT = 230;
 const PROMPT_META_MARKERS = [
@@ -98,6 +96,25 @@ let activeAccountView = "";
 const mobileSidebarMedia = window.matchMedia
   ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
   : null;
+
+function buildApiBaseCandidates() {
+  if (DIRECT_FILE_MODE) {
+    return [WASMER_API_BASE];
+  }
+
+  const host = window.location.hostname.toLowerCase();
+  const wasmerHost = new URL(WASMER_API_BASE).hostname;
+  if (host === "learny.env.pm" || host.endsWith(".github.io")) {
+    return [WASMER_API_BASE];
+  }
+  if (host === wasmerHost) {
+    return [""];
+  }
+  if (host === "localhost" || host === "127.0.0.1" || host === "") {
+    return ["", WASMER_API_BASE];
+  }
+  return ["", WASMER_API_BASE];
+}
 
 function createId(prefix) {
   const randomPart = Math.random().toString(36).slice(2, 10);

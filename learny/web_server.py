@@ -40,7 +40,6 @@ PUBLIC_ROOT_FILES = {
 ALLOWED_CORS_ORIGINS = {
     "https://learny.env.pm",
     "https://learny-ai-adamsrealm1.wasmer.app",
-    "https://learny-ai.wasmer.app",
 }
 
 
@@ -176,7 +175,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "account": _public_account(account),
                     "stats": database.account_stats(int(account["id"])),
                 },
-                extra_headers=[_account_cookie_header(token)],
+                extra_headers=[_account_cookie_header(token, self._needs_cross_site_cookie())],
             )
 
         def _handle_sign_in(self) -> None:
@@ -196,14 +195,14 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "account": _public_account(account),
                     "stats": database.account_stats(int(account["id"])),
                 },
-                extra_headers=[_account_cookie_header(token)],
+                extra_headers=[_account_cookie_header(token, self._needs_cross_site_cookie())],
             )
 
         def _handle_sign_out(self) -> None:
             database.delete_session(self._account_session_token())
             self._send_json(
                 {"authenticated": False, "account": None, "stats": None},
-                extra_headers=[_clear_account_cookie_header()],
+                extra_headers=[_clear_account_cookie_header(self._needs_cross_site_cookie())],
             )
 
         def _handle_delete_account(self) -> None:
@@ -215,7 +214,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             database.delete_account(int(account["id"]))
             self._send_json(
                 {"deleted": True, "authenticated": False, "account": None, "stats": None},
-                extra_headers=[_clear_account_cookie_header()],
+                extra_headers=[_clear_account_cookie_header(self._needs_cross_site_cookie())],
             )
 
         def _handle_get_chats(self) -> None:
@@ -398,6 +397,15 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self.send_header("Access-Control-Allow-Credentials", "true")
             self.send_header("Vary", "Origin")
 
+        def _needs_cross_site_cookie(self) -> bool:
+            origin = self.headers.get("Origin", "").strip()
+            if not origin.startswith("https://") or not _is_allowed_cors_origin(origin):
+                return False
+
+            origin_host = (urlsplit(origin).hostname or "").lower()
+            request_host = self.headers.get("Host", "").split(":", 1)[0].lower()
+            return bool(origin_host and request_host and origin_host != request_host)
+
     return LearnyRequestHandler
 
 
@@ -513,20 +521,21 @@ def _public_account(account: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _account_cookie_header(token: str) -> tuple[str, str]:
+def _account_cookie_header(token: str, cross_site: bool = False) -> tuple[str, str]:
+    same_site = "SameSite=None; Secure" if cross_site else "SameSite=Lax"
     return (
         "Set-Cookie",
         (
-            f"{ACCOUNT_SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; "
-            "Max-Age=2592000"
+            f"{ACCOUNT_SESSION_COOKIE}={token}; Path=/; HttpOnly; {same_site}; Max-Age=2592000"
         ),
     )
 
 
-def _clear_account_cookie_header() -> tuple[str, str]:
+def _clear_account_cookie_header(cross_site: bool = False) -> tuple[str, str]:
+    same_site = "SameSite=None; Secure" if cross_site else "SameSite=Lax"
     return (
         "Set-Cookie",
-        f"{ACCOUNT_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+        f"{ACCOUNT_SESSION_COOKIE}=; Path=/; HttpOnly; {same_site}; Max-Age=0",
     )
 
 
