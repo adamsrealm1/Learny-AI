@@ -34,14 +34,6 @@ DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
 DEFAULT_STATIC_ROOT = PROJECT_ROOT
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 ACCOUNT_SESSION_COOKIE = "learny_account"
-ACCOUNT_ROUTE_FILES = {
-    "/myaccount": "index.html",
-    "/myaccount/": "index.html",
-    "/sign-in": "index.html",
-    "/sign-in/": "index.html",
-    "/create-account": "index.html",
-    "/create-account/": "index.html",
-}
 PUBLIC_ROOT_FILES = {
     "index.html",
 }
@@ -312,8 +304,6 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
         def _serve_static(self, route: str) -> None:
             if route in {"", "/"}:
                 route = "/index.html"
-            route = ACCOUNT_ROUTE_FILES.get(route, route)
-
             try:
                 static_path = _safe_static_path(config.static_dir, route)
             except ValueError:

@@ -136,17 +136,20 @@ class AccountWebTests(unittest.TestCase):
         self.assertFalse(account["authenticated"])
         self.assertEqual(unauthorized, 401)
 
-    def test_account_routes_serve_main_app_popup_shell(self) -> None:
+    def test_account_popup_lives_on_main_app_only(self) -> None:
         with run_account_server() as server:
-            my_account = server.get_text("/myaccount")
-            sign_in = server.get_text("/sign-in")
-            create_account = server.get_text("/create-account")
+            html = server.get_text("/")
+            removed_routes = [
+                server.get_status("/myaccount"),
+                server.get_status("/sign-in"),
+                server.get_status("/create-account"),
+            ]
 
-        for html in (my_account, sign_in, create_account):
-            self.assertIn('id="accountModal"', html)
-            self.assertIn('data-account-view="sign-in"', html)
-            self.assertIn('data-account-view="create-account"', html)
-            self.assertIn('data-account-view="myaccount"', html)
+        self.assertIn('id="accountModal"', html)
+        self.assertIn('data-account-view="sign-in"', html)
+        self.assertIn('data-account-view="create-account"', html)
+        self.assertIn('data-account-view="myaccount"', html)
+        self.assertEqual(removed_routes, [404, 404, 404])
 
 
 class run_account_server:

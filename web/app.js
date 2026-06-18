@@ -64,19 +64,6 @@ const ASK_RETRY_MAX_ATTEMPTS = 4;
 const ASK_RETRY_MAX_ELAPSED_MS = 65000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
-const ACCOUNT_ROUTE_TO_VIEW = {
-  "/myaccount": "myaccount",
-  "/myaccount/": "myaccount",
-  "/sign-in": "sign-in",
-  "/sign-in/": "sign-in",
-  "/create-account": "create-account",
-  "/create-account/": "create-account",
-};
-const ACCOUNT_VIEW_TO_ROUTE = {
-  myaccount: "/myaccount",
-  "sign-in": "/sign-in",
-  "create-account": "/create-account",
-};
 const API_BASE_CANDIDATES = [
   "",
   "https://learny-ai-adamsrealm1.wasmer.app",
@@ -569,27 +556,6 @@ function formatAccountDate(timestamp) {
   })}`;
 }
 
-function accountViewFromPath() {
-  return ACCOUNT_ROUTE_TO_VIEW[window.location.pathname] || "";
-}
-
-function setAccountRoute(view, replace = false) {
-  const route = ACCOUNT_VIEW_TO_ROUTE[view];
-  if (!route || DIRECT_FILE_MODE || window.location.pathname === route) {
-    return;
-  }
-  const method = replace ? "replaceState" : "pushState";
-  window.history[method]({}, "", route);
-}
-
-function restoreChatRoute(replace = false) {
-  if (!accountViewFromPath() || DIRECT_FILE_MODE) {
-    return;
-  }
-  const method = replace ? "replaceState" : "pushState";
-  window.history[method]({}, "", "/");
-}
-
 function setAccountFormMessage(node, text = "", isError = false) {
   if (!node) {
     return;
@@ -714,7 +680,7 @@ async function refreshAccountModalDetails() {
   renderAccountModalDetails();
 }
 
-function openAccountModal(view = currentAccount ? "myaccount" : "sign-in", { updateRoute = true } = {}) {
+function openAccountModal(view = currentAccount ? "myaccount" : "sign-in") {
   if (!accountModal) {
     return;
   }
@@ -723,9 +689,6 @@ function openAccountModal(view = currentAccount ? "myaccount" : "sign-in", { upd
   accountModal.hidden = false;
   document.body.classList.add("account-modal-open");
   showAccountView(view);
-  if (updateRoute) {
-    setAccountRoute(activeAccountView);
-  }
   window.setTimeout(() => {
     const firstInput = accountModal.querySelector("[data-account-view]:not([hidden]) input");
     const closeButton = accountModalClose;
@@ -740,7 +703,7 @@ function openAccountModal(view = currentAccount ? "myaccount" : "sign-in", { upd
   }
 }
 
-function closeAccountModal({ updateRoute = true } = {}) {
+function closeAccountModal() {
   if (!accountModal || accountModal.hidden) {
     return;
   }
@@ -749,9 +712,6 @@ function closeAccountModal({ updateRoute = true } = {}) {
   document.body.classList.remove("account-modal-open");
   activeAccountView = "";
   resetDeleteConfirmation();
-  if (updateRoute) {
-    restoreChatRoute();
-  }
   if (messageInput && !DIRECT_FILE_MODE) {
     messageInput.focus();
   }
@@ -1629,14 +1589,6 @@ async function handleAccountDelete() {
   }
 }
 
-function openInitialAccountRoute() {
-  const view = accountViewFromPath();
-  if (!view) {
-    return;
-  }
-  openAccountModal(view, { updateRoute: false });
-}
-
 chatForm.addEventListener("submit", (event) => {
   event.preventDefault();
   if (isSending) {
@@ -1769,15 +1721,6 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-window.addEventListener("popstate", () => {
-  const view = accountViewFromPath();
-  if (view) {
-    openAccountModal(view, { updateRoute: false });
-  } else {
-    closeAccountModal({ updateRoute: false });
-  }
-});
-
 startWelcomeHeadingCycle();
 createStarField();
 
@@ -1812,16 +1755,7 @@ if (DIRECT_FILE_MODE) {
   renderActiveChat();
 }
 
-openInitialAccountRoute();
-loadAccountAndChats().then(() => {
-  const view = accountViewFromPath();
-  if (view && accountModal && !accountModal.hidden) {
-    showAccountView(view);
-    if (activeAccountView === "myaccount") {
-      refreshAccountModalDetails();
-    }
-  }
-});
+loadAccountAndChats();
 loadStatus();
 if (!DIRECT_FILE_MODE) {
   window.setInterval(loadStatus, STATUS_CHECK_INTERVAL_MS);
