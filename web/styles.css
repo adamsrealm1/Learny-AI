@@ -428,7 +428,7 @@ body.account-modal-open {
 .account-modal-close:focus-visible {
   background: rgba(255, 255, 255, 0.14);
   color: #fff;
-  transform: rotate(7deg) scale(1.05);
+  transform: scale(1.05);
 }
 
 .account-modal-view {
@@ -697,7 +697,7 @@ body.account-modal-open {
 .sidebar-toggle:hover {
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
-  transform: rotate(-8deg) scale(1.06);
+  transform: scale(1.06);
 }
 
 .sidebar-toggle:hover .collapse-icon {
@@ -1811,12 +1811,12 @@ body.account-modal-open {
     box-shadow:
       inset 0 1px rgba(255, 255, 255, 0.1),
       0 12px 28px rgba(0, 0, 0, 0.3);
-    transform: rotate(180deg);
+    transform: none;
   }
 
   .app-shell.sidebar-collapsed .sidebar-toggle:hover {
     background: rgba(255, 255, 255, 0.14);
-    transform: rotate(180deg) scale(1.06);
+    transform: scale(1.06);
   }
 
   .app-shell.sidebar-collapsed .top-bar {
