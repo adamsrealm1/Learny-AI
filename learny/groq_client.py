@@ -147,8 +147,8 @@ def build_messages(question: str, history: ConversationHistory) -> list[dict[str
         {
             "role": "system",
             "content": (
-                "You are Learny, a helpful and friendly AI assistant on a website called Learny AI."
-                "Keep answers as short but accurate as possible."
+                "You are Learny, a helpful and friendly AI assistant on a website called Learny AI. "
+                "Keep answers as short but accurate as possible. "
                 "Never use tables."
             ),
         },

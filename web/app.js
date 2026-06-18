@@ -25,10 +25,10 @@ const CHECK_ICON_PATH = "./icon_library/check.png";
 const COPY_RESET_DELAY_MS = 1400;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
-const WORD_REVEAL_FOOTER_DELAY_MS = 1500;
+const WORD_REVEAL_FOOTER_DELAY_MS = 850;
 const WELCOME_TEXTS = ["Hey! I'm Learny!", "What's on your mind?"];
-const WELCOME_SWAP_INTERVAL_MS = 8000;
-const WELCOME_SWAP_FADE_MS = 820;
+const WELCOME_SWAP_INTERVAL_MS = 5000;
+const WELCOME_SWAP_FADE_MS = 1000;
 const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_CHECK_INTERVAL_MS = 15000;
@@ -152,23 +152,30 @@ function animateWords(container) {
   let wordIndex = 0;
   textNodes.forEach((node) => {
     const fragment = document.createDocumentFragment();
+    let pendingWhitespace = "";
     node.nodeValue.split(/(\s+)/).forEach((part) => {
       if (!part) {
         return;
       }
       if (/^\s+$/.test(part)) {
-        fragment.append(document.createTextNode(part));
+        pendingWhitespace += part;
         return;
       }
 
       const word = document.createElement("span");
       word.className = "word-fade";
-      word.style.animationDelay = `${wordIndex * WORD_REVEAL_STEP_MS}ms`;
       word.style.animationDuration = `${WORD_REVEAL_DURATION_MS}ms`;
-      word.textContent = part;
+      word.textContent = `${pendingWhitespace}${part}`;
       fragment.append(word);
+      window.setTimeout(() => {
+        word.classList.add("word-visible");
+      }, wordIndex * WORD_REVEAL_STEP_MS);
+      pendingWhitespace = "";
       wordIndex += 1;
     });
+    if (pendingWhitespace) {
+      fragment.append(document.createTextNode(pendingWhitespace));
+    }
     node.replaceWith(fragment);
   });
 
@@ -366,6 +373,7 @@ function setDesktopSidebarCollapsed(collapsed) {
 
   const shouldCollapse = Boolean(collapsed && !isMobileSidebarLayout());
   appShell.classList.toggle("sidebar-collapsed", shouldCollapse);
+  document.body.classList.toggle("sidebar-lock", false);
   if (sidebarToggle) {
     sidebarToggle.setAttribute("aria-expanded", String(!shouldCollapse));
     sidebarToggle.title = shouldCollapse ? "Expand sidebar" : "Collapse sidebar";
@@ -657,11 +665,6 @@ function displayMessage(
     const wordCount = animateWords(textNode);
     revealDuration = wordRevealDuration(wordCount);
     node.classList.add("word-revealing");
-    node.style.setProperty("--bubble-reveal-duration", `${Math.max(revealDuration, 420)}ms`);
-    node.style.setProperty(
-      "--footer-reveal-delay",
-      `${revealDuration + WORD_REVEAL_FOOTER_DELAY_MS}ms`,
-    );
     window.setTimeout(() => {
       node.classList.add("reveal-complete");
     }, revealDuration + WORD_REVEAL_FOOTER_DELAY_MS);

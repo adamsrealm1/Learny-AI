@@ -132,10 +132,9 @@ class LearnyGroqOnlyTests(unittest.TestCase):
                 {
                     "role": "system",
                     "content": (
-                        "You are Learny, a natural AI assistant. Use the conversation "
-                        "when it helps with follow-ups. Return only the text Learny "
-                        "should visibly say to the user. Keep answers concise by "
-                        "default, but include enough detail to be useful."
+                        "You are Learny, a helpful and friendly AI assistant on a website called Learny AI. "
+                        "Keep answers as short but accurate as possible. "
+                        "Never use tables."
                     ),
                 },
                 {"role": "user", "content": "who are you"},
