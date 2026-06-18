@@ -148,12 +148,13 @@ class LearnyGroqOnlyTests(unittest.TestCase):
 
         self.assertEqual(answer, "Hi there.")
 
-    def test_status_reports_groq_models_without_storage_fields(self) -> None:
+    def test_status_reports_groq_models_and_storage_backend(self) -> None:
         with run_test_server(StaticAnswerGenerator) as base_url:
             data = get_json(base_url, "/api/status")
 
         self.assertTrue(data["ok"])
         self.assertTrue(data["groqEnabled"])
+        self.assertEqual(data["storageBackend"], "sqlite")
         self.assertEqual(tuple(data["models"]), EXPECTED_MODELS)
         self.assertEqual(
             set(data),
@@ -166,6 +167,7 @@ class LearnyGroqOnlyTests(unittest.TestCase):
                 "secondFallbackModel",
                 "thirdFallbackModel",
                 "models",
+                "storageBackend",
                 "unknownMessage",
                 "error",
             },

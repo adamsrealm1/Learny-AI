@@ -23,8 +23,9 @@ from .groq_client import (
     THIRD_FALLBACK_GROQ_MODEL,
     GroqAnswerGenerator,
 )
-from .database import AccountError, AuthenticationError, LearnyDatabase
+from .database import AccountError, AuthenticationError
 from .messages import GENERIC_ERROR_MESSAGE
+from .storage import create_learny_database
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +40,7 @@ PUBLIC_ROOT_FILES = {
 }
 ALLOWED_CORS_ORIGINS = {
     "https://learny.env.pm",
+    "https://learny-ai.wasmer.app",
     "https://learny-ai-adamsrealm1.wasmer.app",
 }
 
@@ -69,7 +71,10 @@ class SessionStore:
 
 def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
     session_store = SessionStore()
-    database = LearnyDatabase(config.database_path or _default_database_path())
+    database = create_learny_database(
+        config.database_path or _default_database_path(),
+        prefer_wasmer_database=config.database_path is None,
+    )
 
     class LearnyRequestHandler(BaseHTTPRequestHandler):
         server_version = "LearnyWeb/2.0"
@@ -139,6 +144,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "secondFallbackModel": SECOND_FALLBACK_GROQ_MODEL,
                     "thirdFallbackModel": THIRD_FALLBACK_GROQ_MODEL,
                     "models": list(DEFAULT_GROQ_MODELS),
+                    "storageBackend": getattr(database, "backend_name", "unknown"),
                     "unknownMessage": DEFAULT_FALLBACK,
                     "error": None if groq_enabled else GENERIC_ERROR_MESSAGE,
                 }
@@ -436,7 +442,6 @@ def main(argv: list[str] | None = None) -> int:
     config = WebServerConfig(
         static_dir=args.static.resolve(),
         generator_factory=GroqAnswerGenerator.from_env,
-        database_path=_default_database_path(),
     )
     run_server(args.host, args.port, config)
     return 0

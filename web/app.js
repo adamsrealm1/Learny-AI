@@ -65,6 +65,7 @@ const ASK_RETRY_MAX_ELAPSED_MS = 65000;
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
 const WASMER_API_BASE = "https://learny-ai-adamsrealm1.wasmer.app";
+const WASMER_API_FALLBACK_BASE = "https://learny-ai.wasmer.app";
 const API_BASE_CANDIDATES = buildApiBaseCandidates();
 const DESKTOP_STAR_COUNT = 360;
 const MOBILE_STAR_COUNT = 230;
@@ -104,16 +105,18 @@ function buildApiBaseCandidates() {
 
   const host = window.location.hostname.toLowerCase();
   const wasmerHost = new URL(WASMER_API_BASE).hostname;
+  const wasmerFallbackHost = new URL(WASMER_API_FALLBACK_BASE).hostname;
   if (host === "learny.env.pm" || host.endsWith(".github.io")) {
-    return [WASMER_API_BASE];
+    return [WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
   }
-  if (host === wasmerHost) {
-    return [""];
+  if (host === wasmerHost || host === wasmerFallbackHost) {
+    const fallback = host === wasmerHost ? WASMER_API_FALLBACK_BASE : WASMER_API_BASE;
+    return ["", fallback];
   }
   if (host === "localhost" || host === "127.0.0.1" || host === "") {
-    return ["", WASMER_API_BASE];
+    return ["", WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
   }
-  return ["", WASMER_API_BASE];
+  return ["", WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
 }
 
 function createId(prefix) {

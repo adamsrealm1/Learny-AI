@@ -27,6 +27,8 @@ class AuthenticationError(ValueError):
 
 
 class LearnyDatabase:
+    backend_name = "sqlite"
+
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.RLock()

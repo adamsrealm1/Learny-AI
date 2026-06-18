@@ -6,4 +6,10 @@ env:
   PYTHONEXECUTABLE: /bin/python
 cli_args:
 - /src/main.py
+capabilities:
+  database:
+    engine: mysql
+  locality:
+    regions:
+    - us-socal1
 kind: wasmer.io/App.v0

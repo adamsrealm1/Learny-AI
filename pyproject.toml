@@ -1,9 +1,11 @@
 [project]
 name = "learny-ai"
-version = "0.1.0"
+version = "0.2.5"
 description = "A Groq-powered Learny AI website."
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "PyMySQL>=1.1.1,<2",
+]
 
 [project.scripts]
 learny = "learny.cli:main"
