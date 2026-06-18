@@ -45,6 +45,7 @@ const ACTIVE_CHAT_KEY = "learny-active-chat-id";
 const SESSION_KEY = "learny-session-id";
 const COPY_ICON_PATH = "./icon_library/copy.png";
 const CHECK_ICON_PATH = "./icon_library/check.png";
+const X_ICON_PATH = "./icon_library/X.png";
 const COPY_RESET_DELAY_MS = 1400;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
@@ -1244,7 +1245,13 @@ function renderChatList() {
     deleteButton.type = "button";
     deleteButton.title = "Delete chat";
     deleteButton.setAttribute("aria-label", `Delete ${chat.title}`);
-    deleteButton.textContent = "x";
+
+    const deleteIcon = document.createElement("img");
+    deleteIcon.className = "ui-icon x-icon";
+    deleteIcon.src = X_ICON_PATH;
+    deleteIcon.alt = "";
+    deleteIcon.setAttribute("aria-hidden", "true");
+    deleteButton.append(deleteIcon);
 
     openButton.append(title, meta);
     item.append(openButton, deleteButton);
