@@ -120,7 +120,6 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "Access-Control-Allow-Headers",
                     "Content-Type, X-Learny-Session",
                 )
-                self.send_header("Access-Control-Allow-Credentials", "true")
                 self.send_header("Access-Control-Max-Age", "86400")
                 self.end_headers()
                 return

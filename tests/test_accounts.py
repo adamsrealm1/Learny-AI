@@ -151,6 +151,13 @@ class AccountWebTests(unittest.TestCase):
         self.assertIn('data-account-view="myaccount"', html)
         self.assertEqual(removed_routes, [404, 404, 404])
 
+    def test_cors_preflight_has_single_credentials_header(self) -> None:
+        with run_account_server() as server:
+            headers = server.options_headers("/api/status")
+
+        self.assertEqual(headers["origin"], "https://learny.env.pm")
+        self.assertEqual(headers["credentials"], ["true"])
+
 
 class run_account_server:
     def __init__(self) -> None:
@@ -221,6 +228,22 @@ class run_account_server:
                 return int(error.code)
             finally:
                 error.close()
+
+    def options_headers(self, path: str) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            headers={
+                "Origin": "https://learny.env.pm",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "content-type,x-learny-session",
+            },
+            method="OPTIONS",
+        )
+        with self.opener.open(request, timeout=10) as response:
+            return {
+                "origin": response.headers.get("Access-Control-Allow-Origin"),
+                "credentials": response.headers.get_all("Access-Control-Allow-Credentials"),
+            }
 
 
 if __name__ == "__main__":

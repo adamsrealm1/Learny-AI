@@ -66,7 +66,6 @@ const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
 const API_BASE_CANDIDATES = [
   "",
-  "https://learny-ai-adamsrealm1.wasmer.app",
   "https://learny-ai.wasmer.app",
 ];
 const DESKTOP_STAR_COUNT = 360;
@@ -1345,13 +1344,17 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       : null;
 
     try {
+      const requestHeaders = { ...headers };
+      if (fetchOptions.body !== undefined && !("Content-Type" in requestHeaders)) {
+        requestHeaders["Content-Type"] = "application/json";
+      }
+      if (sessionId && !("X-Learny-Session" in requestHeaders)) {
+        requestHeaders["X-Learny-Session"] = sessionId;
+      }
+
       const response = await fetch(apiUrl(apiBase, path), {
         credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Learny-Session": sessionId,
-          ...headers,
-        },
+        headers: requestHeaders,
         ...fetchOptions,
         ...(controller ? { signal: controller.signal } : {}),
       });
