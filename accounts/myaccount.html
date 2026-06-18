@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Account - Learny AI</title>
+    <link rel="stylesheet" href="../web/styles.css?v=accounts">
+    <link rel="stylesheet" href="../web/accounts.css?v=accounts">
+  </head>
+  <body class="account-page" data-account-page="myaccount">
+    <div class="star-field" id="starField" aria-hidden="true"></div>
+    <main class="account-shell">
+      <nav class="account-nav" aria-label="Account navigation">
+        <a class="brand-link" href="/">
+          <span class="brand-mark" aria-hidden="true">L</span>
+          <span>Learny AI</span>
+        </a>
+        <div class="account-nav-actions">
+          <a href="/sign-in">Sign in</a>
+          <a href="/create-account">Create account</a>
+        </div>
+      </nav>
+
+      <section class="account-hero">
+        <p class="account-kicker">Learny Account</p>
+        <h1 id="accountHeadline">Your space is loading.</h1>
+        <p id="accountSubhead">
+          Chats, sessions, and account details live together when you sign in.
+        </p>
+      </section>
+
+      <section class="account-grid" id="accountDashboard" hidden>
+        <article class="account-card account-profile-card">
+          <div class="account-avatar" id="accountAvatar">L</div>
+          <div>
+            <p class="eyebrow">Signed in as</p>
+            <h2 id="accountUsername">Learny user</h2>
+            <p id="accountCreated">Account ready</p>
+          </div>
+        </article>
+
+        <article class="account-card metric-card">
+          <span>Chats</span>
+          <strong id="chatCount">0</strong>
+        </article>
+        <article class="account-card metric-card">
+          <span>Messages</span>
+          <strong id="messageCount">0</strong>
+        </article>
+        <article class="account-card metric-card">
+          <span>Sessions</span>
+          <strong id="sessionCount">0</strong>
+        </article>
+
+        <article class="account-card account-wide-card">
+          <p class="eyebrow">Storage</p>
+          <h2>Database-backed memory</h2>
+          <p>
+            Signed-in chats are stored by Learny's Python server in SQLite, so the account can
+            restore conversations after the browser changes or local storage is cleared.
+          </p>
+          <div class="account-card-actions">
+            <a class="primary-account-action" href="/">Open Learny</a>
+            <button class="ghost-account-action" id="signOutButton" type="button">Sign out</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="account-card signed-out-card" id="signedOutPanel" hidden>
+        <p class="eyebrow">Account needed</p>
+        <h2>Sign in to unlock synced chats.</h2>
+        <p>
+          Create an account or sign in, then Learny can store your conversations in the local
+          server database instead of only this browser.
+        </p>
+        <div class="account-card-actions">
+          <a class="primary-account-action" href="/sign-in">Sign in</a>
+          <a class="ghost-account-action" href="/create-account">Create account</a>
+        </div>
+      </section>
+    </main>
+    <script src="../web/accounts.js?v=accounts" defer></script>
+  </body>
+</html>

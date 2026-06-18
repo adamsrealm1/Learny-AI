@@ -7,6 +7,7 @@ import os
 import secrets
 from dataclasses import dataclass
 from http import HTTPStatus
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -22,6 +23,7 @@ from .groq_client import (
     THIRD_FALLBACK_GROQ_MODEL,
     GroqAnswerGenerator,
 )
+from .database import AccountError, AuthenticationError, LearnyDatabase
 from .messages import GENERIC_ERROR_MESSAGE
 
 
@@ -30,6 +32,19 @@ WASMER_ROOT = Path("/")
 WASMER_APP_DIR = WASMER_ROOT / "app"
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
 DEFAULT_STATIC_ROOT = PROJECT_ROOT
+DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
+ACCOUNT_SESSION_COOKIE = "learny_account"
+ACCOUNT_ROUTE_FILES = {
+    "/myaccount": "accounts/myaccount.html",
+    "/myaccount/": "accounts/myaccount.html",
+    "/sign-in": "accounts/sign-in.html",
+    "/sign-in/": "accounts/sign-in.html",
+    "/create-account": "accounts/create-account.html",
+    "/create-account/": "accounts/create-account.html",
+}
+PUBLIC_ROOT_FILES = {
+    "index.html",
+}
 ALLOWED_CORS_ORIGINS = {
     "https://learny.env.pm",
     "https://learny-ai-adamsrealm1.wasmer.app",
@@ -41,6 +56,7 @@ ALLOWED_CORS_ORIGINS = {
 class WebServerConfig:
     static_dir: Path
     generator_factory: Callable[[], AnswerGenerator | None]
+    database_path: Path | None = None
 
 
 class SessionStore:
@@ -62,6 +78,7 @@ class SessionStore:
 
 def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
     session_store = SessionStore()
+    database = LearnyDatabase(config.database_path or _default_database_path())
 
     class LearnyRequestHandler(BaseHTTPRequestHandler):
         server_version = "LearnyWeb/2.0"
@@ -71,12 +88,30 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if route == "/api/status":
                 self._handle_status()
                 return
+            if route == "/api/account":
+                self._handle_account()
+                return
+            if route == "/api/chats":
+                self._handle_get_chats()
+                return
             self._serve_static(route)
 
         def do_POST(self) -> None:
             route = urlsplit(self.path).path
             if route == "/api/ask":
                 self._handle_ask()
+                return
+            if route == "/api/accounts/create":
+                self._handle_create_account()
+                return
+            if route == "/api/accounts/sign-in":
+                self._handle_sign_in()
+                return
+            if route == "/api/accounts/sign-out":
+                self._handle_sign_out()
+                return
+            if route == "/api/chats/sync":
+                self._handle_sync_chats()
                 return
             self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.NOT_FOUND)
 
@@ -90,6 +125,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "Access-Control-Allow-Headers",
                     "Content-Type, X-Learny-Session",
                 )
+                self.send_header("Access-Control-Allow-Credentials", "true")
                 self.send_header("Access-Control-Max-Age", "86400")
                 self.end_headers()
                 return
@@ -115,6 +151,93 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 }
             )
 
+        def _handle_account(self) -> None:
+            account = self._current_account()
+            if account is None:
+                self._send_json({"authenticated": False, "account": None, "stats": None})
+                return
+
+            self._send_json(
+                {
+                    "authenticated": True,
+                    "account": _public_account(account),
+                    "stats": database.account_stats(int(account["id"])),
+                }
+            )
+
+        def _handle_create_account(self) -> None:
+            try:
+                body = self._read_json_body()
+                username = _required_string(body, "username")
+                password = _required_string(body, "password")
+                account = database.create_account(username, password)
+                token = database.create_session(int(account["id"]))
+            except (ValueError, AccountError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+
+            self._send_json(
+                {
+                    "authenticated": True,
+                    "account": _public_account(account),
+                    "stats": database.account_stats(int(account["id"])),
+                },
+                extra_headers=[_account_cookie_header(token)],
+            )
+
+        def _handle_sign_in(self) -> None:
+            try:
+                body = self._read_json_body()
+                username = _required_string(body, "username")
+                password = _required_string(body, "password")
+                account = database.authenticate(username, password)
+                token = database.create_session(int(account["id"]))
+            except (ValueError, AccountError, AuthenticationError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+
+            self._send_json(
+                {
+                    "authenticated": True,
+                    "account": _public_account(account),
+                    "stats": database.account_stats(int(account["id"])),
+                },
+                extra_headers=[_account_cookie_header(token)],
+            )
+
+        def _handle_sign_out(self) -> None:
+            database.delete_session(self._account_session_token())
+            self._send_json(
+                {"authenticated": False, "account": None, "stats": None},
+                extra_headers=[_clear_account_cookie_header()],
+            )
+
+        def _handle_get_chats(self) -> None:
+            account = self._current_account()
+            if account is None:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+
+            self._send_json({"chats": database.list_chats(int(account["id"]))})
+
+        def _handle_sync_chats(self) -> None:
+            account = self._current_account()
+            if account is None:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+
+            try:
+                body = self._read_json_body()
+                chats = body.get("chats", [])
+                if not isinstance(chats, list):
+                    raise ValueError("chats must be a list.")
+                stored_chats = database.replace_account_chats(int(account["id"]), chats)
+            except ValueError:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+
+            self._send_json({"chats": stored_chats, "stats": database.account_stats(int(account["id"]))})
+
         def _handle_ask(self) -> None:
             try:
                 body = self._read_json_body()
@@ -123,15 +246,44 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
 
-            session_id, history = session_store.get(
+            account = self._current_account()
+            chat_id = _optional_string(body, "chatId")
+            requested_session_id = (
                 _optional_string(body, "sessionId")
                 or self.headers.get("X-Learny-Session")
             )
+            session_id, session_history = session_store.get(requested_session_id)
+            if account is not None and chat_id:
+                database.ensure_chat(
+                    int(account["id"]),
+                    chat_id,
+                    title=_chat_title_from_message(message),
+                    session_id=session_id,
+                )
+                history = database.history_for_chat(int(account["id"]), chat_id, max_turns=8)
+            else:
+                history = session_history
+
             bot = Learny(
                 generator=config.generator_factory(),
                 history=history,
             )
             response = bot.reply(message)
+            if account is not None and chat_id:
+                database.append_message(
+                    int(account["id"]),
+                    chat_id,
+                    speaker="You",
+                    text=message,
+                    source="sent",
+                )
+                database.append_message(
+                    int(account["id"]),
+                    chat_id,
+                    speaker="Learny",
+                    text=response.answer,
+                    source=response.source,
+                )
             self._send_json(
                 {
                     "sessionId": session_id,
@@ -145,6 +297,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
         def _serve_static(self, route: str) -> None:
             if route in {"", "/"}:
                 route = "/index.html"
+            route = ACCOUNT_ROUTE_FILES.get(route, route)
 
             try:
                 static_path = _safe_static_path(config.static_dir, route)
@@ -171,6 +324,21 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(payload)
 
+        def _current_account(self) -> dict[str, Any] | None:
+            return database.get_account_for_session(self._account_session_token())
+
+        def _account_session_token(self) -> str | None:
+            cookie = SimpleCookie()
+            try:
+                cookie.load(self.headers.get("Cookie", ""))
+            except Exception:
+                return None
+            morsel = cookie.get(ACCOUNT_SESSION_COOKIE)
+            if morsel is None:
+                return None
+            token = morsel.value.strip()
+            return token or None
+
         def _read_json_body(self) -> dict[str, Any]:
             content_length = int(self.headers.get("Content-Length", "0"))
             if content_length <= 0:
@@ -192,6 +360,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self,
             data: dict[str, Any],
             status: HTTPStatus = HTTPStatus.OK,
+            extra_headers: list[tuple[str, str]] | None = None,
         ) -> None:
             payload = json.dumps(data).encode("utf-8")
             self.send_response(status)
@@ -199,6 +368,8 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Length", str(len(payload)))
             self.send_header("Cache-Control", "no-store")
             self._send_cors_headers()
+            for header, value in extra_headers or []:
+                self.send_header(header, value)
             self.end_headers()
             self.wfile.write(payload)
 
@@ -220,6 +391,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if not _is_allowed_cors_origin(origin):
                 return
             self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Credentials", "true")
             self.send_header("Vary", "Origin")
 
     return LearnyRequestHandler
@@ -252,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     config = WebServerConfig(
         static_dir=args.static.resolve(),
         generator_factory=GroqAnswerGenerator.from_env,
+        database_path=_default_database_path(),
     )
     run_server(args.host, args.port, config)
     return 0
@@ -269,14 +442,23 @@ def _default_static_dir() -> Path:
     return DEFAULT_STATIC_DIR
 
 
+def _default_database_path() -> Path:
+    configured = os.environ.get("LEARNY_DB_PATH", "").strip()
+    if configured:
+        return Path(configured)
+    if Path("/data").exists():
+        return Path("/data/learny.sqlite3")
+    return DEFAULT_DATA_DIR / "learny.sqlite3"
+
+
 def _safe_static_path(static_dir: Path, route: str) -> Path:
     route = unquote(route).replace("\\", "/").lstrip("/")
     if not route:
         route = "index.html"
     if (
         _uses_root_static_layout(static_dir)
-        and route != "index.html"
-        and not route.startswith(("web/", "icon_library/"))
+        and route not in PUBLIC_ROOT_FILES
+        and not route.startswith(("web/", "icon_library/", "accounts/"))
     ):
         raise ValueError("Static path is not part of the public web files.")
     candidate = (static_dir / route).resolve()
@@ -317,3 +499,35 @@ def _clean_session_id(session_id: str | None) -> str | None:
     if not session_id:
         return None
     return "".join(character for character in session_id if character.isalnum() or character in "-_")[:80]
+
+
+def _public_account(account: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "username": str(account["username"]),
+        "createdAt": int(account["createdAt"]),
+        "lastSeenAt": int(account["lastSeenAt"]),
+    }
+
+
+def _account_cookie_header(token: str) -> tuple[str, str]:
+    return (
+        "Set-Cookie",
+        (
+            f"{ACCOUNT_SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; "
+            "Max-Age=2592000"
+        ),
+    )
+
+
+def _clear_account_cookie_header() -> tuple[str, str]:
+    return (
+        "Set-Cookie",
+        f"{ACCOUNT_SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+    )
+
+
+def _chat_title_from_message(message: str) -> str:
+    title = " ".join(message.strip().split())
+    if not title:
+        return "New chat"
+    return title[:34] + ("..." if len(title) > 34 else "")

@@ -16,6 +16,8 @@ const sidebarScrim = document.querySelector("#sidebarScrim");
 const messageSearchInput = document.querySelector("#messageSearchInput");
 const messageSearchCount = document.querySelector("#messageSearchCount");
 const welcomeHeading = document.querySelector("#welcomeHeading");
+const accountButton = document.querySelector("#accountButton");
+const accountStatusText = document.querySelector("#accountStatusText");
 
 const CHATS_KEY = "learny-chats";
 const ACTIVE_CHAT_KEY = "learny-active-chat-id";
@@ -27,7 +29,7 @@ const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
 const WORD_REVEAL_FOOTER_DELAY_MS = 850;
 const WELCOME_TEXTS = ["Hey! I'm Learny!", "What's on your mind?"];
-const WELCOME_SWAP_INTERVAL_MS = 5000;
+const WELCOME_LOCK_DELAY_MS = 2200;
 const WELCOME_SWAP_FADE_MS = 1000;
 const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
@@ -65,7 +67,11 @@ let messageSearchQuery = "";
 let messageSearchIndex = 0;
 let activeApiBase = "";
 let welcomeTextIndex = 0;
-let welcomeIntervalId = null;
+let welcomeTimeoutId = null;
+let welcomeSequenceStarted = false;
+let currentAccount = null;
+let serverChatsLoaded = false;
+let serverSyncTimerId = null;
 const mobileSidebarMedia = window.matchMedia
   ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
   : null;
@@ -187,6 +193,40 @@ function wordRevealDuration(wordCount) {
     return 0;
   }
   return (wordCount - 1) * WORD_REVEAL_STEP_MS + WORD_REVEAL_DURATION_MS;
+}
+
+function scrollChatToBottom({ smooth = true } = {}) {
+  if (!chatLog) {
+    return;
+  }
+
+  const top = chatLog.scrollHeight;
+  if (typeof chatLog.scrollTo === "function") {
+    chatLog.scrollTo({ top, behavior: smooth ? "smooth" : "auto" });
+    return;
+  }
+
+  chatLog.scrollTop = top;
+}
+
+function keepChatPinnedToBottom(milliseconds) {
+  if (!chatLog || !Number.isFinite(milliseconds) || milliseconds <= 0) {
+    scrollChatToBottom({ smooth: true });
+    return;
+  }
+
+  const deadline = performance.now() + milliseconds;
+
+  function tick() {
+    chatLog.scrollTop = chatLog.scrollHeight;
+    if (performance.now() < deadline) {
+      window.requestAnimationFrame(tick);
+      return;
+    }
+    scrollChatToBottom({ smooth: true });
+  }
+
+  window.requestAnimationFrame(tick);
 }
 
 async function copyTextToClipboard(text) {
@@ -333,19 +373,26 @@ function renderWelcomeHeadingText(text) {
 }
 
 function startWelcomeHeadingCycle() {
-  if (!welcomeHeading || WELCOME_TEXTS.length < 2 || welcomeIntervalId) {
+  if (!welcomeHeading || welcomeSequenceStarted) {
     return;
   }
 
-  renderWelcomeHeadingText(WELCOME_TEXTS[welcomeTextIndex]);
-  welcomeIntervalId = window.setInterval(() => {
+  welcomeSequenceStarted = true;
+  welcomeTextIndex = 0;
+  renderWelcomeHeadingText(WELCOME_TEXTS[0]);
+  if (WELCOME_TEXTS.length < 2) {
+    return;
+  }
+
+  welcomeTimeoutId = window.setTimeout(() => {
     welcomeHeading.classList.add("is-changing");
     window.setTimeout(() => {
-      welcomeTextIndex = (welcomeTextIndex + 1) % WELCOME_TEXTS.length;
+      welcomeTextIndex = 1;
       renderWelcomeHeadingText(WELCOME_TEXTS[welcomeTextIndex]);
       welcomeHeading.classList.remove("is-changing");
+      welcomeTimeoutId = null;
     }, WELCOME_SWAP_FADE_MS);
-  }, WELCOME_SWAP_INTERVAL_MS);
+  }, WELCOME_LOCK_DELAY_MS);
 }
 
 function isMobileSidebarLayout() {
@@ -422,6 +469,7 @@ function loadStoredChats() {
           typeof chat.sessionId === "string" && chat.sessionId.trim()
             ? chat.sessionId.trim()
             : createId("session"),
+        createdAt: Number.isFinite(chat.createdAt) ? chat.createdAt : Date.now(),
         updatedAt: Number.isFinite(chat.updatedAt) ? chat.updatedAt : Date.now(),
         messages: Array.isArray(chat.messages)
           ? chat.messages
@@ -437,6 +485,7 @@ function loadStoredChats() {
                 text: sanitizeStoredMessageText(message),
                 source: sanitizeStoredMessageSource(message),
                 thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
+                createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
               }))
           : [],
       }));
@@ -447,6 +496,151 @@ function loadStoredChats() {
 
 function saveChats() {
   localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
+  if (currentAccount && serverChatsLoaded) {
+    queueServerChatSync();
+  }
+}
+
+function updateAccountButton() {
+  if (!accountButton || !accountStatusText) {
+    return;
+  }
+
+  if (currentAccount) {
+    accountButton.classList.add("signed-in");
+    accountStatusText.textContent = `@${currentAccount.username}`;
+    return;
+  }
+
+  accountButton.classList.remove("signed-in");
+  accountStatusText.textContent = "Sign in to sync";
+}
+
+function normalizeServerChats(serverChats) {
+  if (!Array.isArray(serverChats)) {
+    return [];
+  }
+
+  return serverChats
+    .filter((chat) => chat && typeof chat === "object" && typeof chat.id === "string")
+    .map((chat) => ({
+      id: chat.id,
+      title: typeof chat.title === "string" && chat.title.trim() ? chat.title.trim() : "New chat",
+      sessionId:
+        typeof chat.sessionId === "string" && chat.sessionId.trim()
+          ? chat.sessionId.trim()
+          : createId("session"),
+      createdAt: Number.isFinite(chat.createdAt) ? chat.createdAt : Date.now(),
+      updatedAt: Number.isFinite(chat.updatedAt) ? chat.updatedAt : Date.now(),
+      messages: Array.isArray(chat.messages)
+        ? chat.messages
+            .filter(
+              (message) =>
+                message &&
+                typeof message === "object" &&
+                typeof message.speaker === "string" &&
+                typeof message.text === "string",
+            )
+            .map((message) => ({
+              speaker: message.speaker,
+              text: sanitizeStoredMessageText(message),
+              source: sanitizeStoredMessageSource(message),
+              thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
+              createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
+            }))
+        : [],
+    }));
+}
+
+function queueServerChatSync() {
+  if (!currentAccount || !serverChatsLoaded || DIRECT_FILE_MODE) {
+    return;
+  }
+
+  if (serverSyncTimerId !== null) {
+    window.clearTimeout(serverSyncTimerId);
+  }
+  serverSyncTimerId = window.setTimeout(() => {
+    serverSyncTimerId = null;
+    syncChatsToServer();
+  }, 260);
+}
+
+async function syncChatsToServer() {
+  if (!currentAccount || DIRECT_FILE_MODE) {
+    return;
+  }
+
+  try {
+    await apiFetch(
+      "/api/chats/sync",
+      {
+        method: "POST",
+        body: JSON.stringify({ chats }),
+        timeoutMs: STATUS_FETCH_TIMEOUT_MS,
+      },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+  } catch (error) {
+    setConnection("offline", "Servers offline");
+  }
+}
+
+async function loadAccountAndChats() {
+  updateAccountButton();
+  if (DIRECT_FILE_MODE) {
+    return;
+  }
+
+  try {
+    const accountData = await apiFetch(
+      "/api/account",
+      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    if (!accountData.authenticated || !accountData.account) {
+      currentAccount = null;
+      serverChatsLoaded = false;
+      updateAccountButton();
+      return;
+    }
+
+    currentAccount = accountData.account;
+    updateAccountButton();
+
+    const chatData = await apiFetch(
+      "/api/chats",
+      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    const remoteChats = normalizeServerChats(chatData.chats);
+    serverChatsLoaded = true;
+
+    if (remoteChats.length > 0) {
+      chats = remoteChats;
+      if (!getActiveChat()) {
+        activeChatId = sortedChats()[0].id;
+      }
+      const activeChat = getActiveChat();
+      sessionId = activeChat ? activeChat.sessionId : "";
+      localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
+      if (activeChat) {
+        localStorage.setItem(ACTIVE_CHAT_KEY, activeChat.id);
+        localStorage.setItem(SESSION_KEY, activeChat.sessionId);
+      }
+      renderChatList();
+      renderActiveChat();
+      return;
+    }
+
+    if (chats.length > 0) {
+      queueServerChatSync();
+    }
+  } catch (error) {
+    currentAccount = null;
+    serverChatsLoaded = false;
+    updateAccountButton();
+  }
 }
 
 function getChatById(chatId) {
@@ -569,6 +763,7 @@ function createChat() {
     id: createId("chat"),
     title: "New chat",
     sessionId: createId("session"),
+    createdAt: Date.now(),
     updatedAt: Date.now(),
     messages: [],
   };
@@ -661,9 +856,11 @@ function displayMessage(
   textNode.className = "bubble-text markdown-body";
   textNode.innerHTML = renderMessageHtml(text);
   let revealDuration = 0;
+  let pinnedScrollDuration = 0;
   if (shouldAnimateWords && speaker === "Learny") {
     const wordCount = animateWords(textNode);
     revealDuration = wordRevealDuration(wordCount);
+    pinnedScrollDuration = revealDuration + WORD_REVEAL_FOOTER_DELAY_MS + 520;
     node.classList.add("word-revealing");
     window.setTimeout(() => {
       node.classList.add("reveal-complete");
@@ -699,13 +896,19 @@ function displayMessage(
 
   chatLog.append(node);
   updateMessageSearch();
-  chatLog.scrollTop = chatLog.scrollHeight;
+  scrollChatToBottom({ smooth: true });
+  if (pinnedScrollDuration > 0) {
+    keepChatPinnedToBottom(pinnedScrollDuration);
+  }
   return node;
 }
 
 function saveMessage(message) {
   const chat = ensureActiveChat();
-  chat.messages.push(message);
+  chat.messages.push({
+    ...message,
+    createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
+  });
   chat.updatedAt = Date.now();
 
   if (message.speaker === "You" && chat.title === "New chat") {
@@ -830,7 +1033,7 @@ function addTyping() {
     bubble.append(dot);
   }
   chatLog.append(node);
-  chatLog.scrollTop = chatLog.scrollHeight;
+  scrollChatToBottom({ smooth: true });
   return node;
 }
 
@@ -842,7 +1045,15 @@ function isApiResponseData(data) {
   if (!data || typeof data !== "object") {
     return false;
   }
-  return "app" in data || "answer" in data || "questions" in data || "error" in data;
+  return (
+    "app" in data ||
+    "answer" in data ||
+    "questions" in data ||
+    "error" in data ||
+    "authenticated" in data ||
+    "account" in data ||
+    "chats" in data
+  );
 }
 
 function sleep(milliseconds) {
@@ -908,6 +1119,7 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
 
     try {
       const response = await fetch(apiUrl(apiBase, path), {
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           "X-Learny-Session": sessionId,
@@ -993,7 +1205,7 @@ async function askLearny(message) {
           "/api/ask",
           {
             method: "POST",
-            body: JSON.stringify({ message, sessionId }),
+            body: JSON.stringify({ message, sessionId, chatId: chat.id }),
             timeoutMs: ASK_REQUEST_TIMEOUT_MS,
           },
           activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
@@ -1160,6 +1372,7 @@ if (DIRECT_FILE_MODE) {
   renderActiveChat();
 }
 
+loadAccountAndChats();
 loadStatus();
 if (!DIRECT_FILE_MODE) {
   window.setInterval(loadStatus, STATUS_CHECK_INTERVAL_MS);

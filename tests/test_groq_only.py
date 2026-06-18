@@ -209,6 +209,7 @@ class run_test_server:
         config = WebServerConfig(
             static_dir=root,
             generator_factory=self.generator_factory,
+            database_path=root / "learny-test.sqlite3",
         )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(config))
         host, port = self.server.server_address

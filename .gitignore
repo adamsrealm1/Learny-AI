@@ -10,3 +10,6 @@ venv/
 env/
 .env
 .learny-state/
+data/
+*.sqlite3
+*.log
