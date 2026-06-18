@@ -42,6 +42,10 @@ body {
   overflow: hidden;
 }
 
+body.sidebar-lock {
+  overflow: hidden;
+}
+
 button,
 input {
   font: inherit;
@@ -165,6 +169,10 @@ input:focus-visible {
   z-index: 1;
 }
 
+.sidebar-scrim {
+  display: none;
+}
+
 .sidebar-header {
   display: flex;
   align-items: center;
@@ -184,7 +192,9 @@ input:focus-visible {
 
 .sidebar-toggle,
 .add-chat-button,
-.send-button {
+.send-button,
+.mobile-sidebar-button,
+.message-copy-button {
   display: inline-grid;
   place-items: center;
 }
@@ -625,14 +635,90 @@ input:focus-visible {
 .top-bar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 12px;
   padding: 0 20px;
+}
+
+.mobile-sidebar-button {
+  display: none;
+}
+
+.message-search {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: min(340px, 38vw);
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.24);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.06),
+    0 10px 28px rgba(0, 0, 0, 0.18);
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.message-search:focus-within {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(255, 255, 255, 0.035),
+    0 12px 30px rgba(0, 0, 0, 0.22);
+  transform: translateY(-1px);
+}
+
+.message-search-icon {
+  width: 14px;
+  height: 14px;
+  opacity: 0.72;
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.message-search:focus-within .message-search-icon {
+  opacity: 1;
+  transform: scale(1.06);
+}
+
+.message-search input {
+  min-width: 0;
+  height: 30px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.8rem;
+}
+
+.message-search input::placeholder {
+  color: rgba(180, 180, 180, 0.68);
+}
+
+.message-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.message-search-count {
+  min-width: 24px;
+  color: var(--subtle);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .connection-pill {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  flex: 0 0 auto;
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -726,6 +812,22 @@ input:focus-visible {
   font-size: 3.22rem;
   font-weight: 500;
   line-height: 1.2;
+  opacity: 1;
+  text-align: center;
+  transform: translateY(0);
+  transition: opacity 260ms ease, transform 260ms ease;
+  will-change: opacity, transform;
+}
+
+.empty-state h1.is-changing {
+  opacity: 0;
+  transform: translateY(7px);
+}
+
+.welcome-word {
+  display: inline-block;
+  opacity: 0;
+  animation: welcomeWordIn 460ms ease forwards;
 }
 
 .message {
@@ -769,6 +871,14 @@ input:focus-visible {
 .bubble-text,
 .thought-time {
   display: block;
+}
+
+.message-footer {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--subtle);
 }
 
 .markdown-body {
@@ -971,23 +1081,72 @@ input:focus-visible {
 }
 
 .message.learny .thought-time {
-  max-height: 0;
+  max-height: none;
   margin-top: 0;
   color: var(--subtle);
   font-size: 0.72rem;
   line-height: 1.35;
-  opacity: 0;
-  overflow: hidden;
-  transform: translateY(-2px);
-  transition: opacity 400ms ease, transform 400ms ease, max-height 400ms ease, margin-top 400ms ease;
+  opacity: 1;
+  overflow: visible;
+  transform: translateY(0);
 }
 
-.message.learny .bubble:hover .thought-time,
-.message.learny .bubble:focus-within .thought-time {
-  max-height: 24px;
-  margin-top: 8px;
+.message-copy-button {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.055);
+  opacity: 0.72;
+  transition:
+    background 140ms ease,
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.message-copy-button:hover,
+.message-copy-button:focus-visible,
+.message-copy-button.copied {
+  background: rgba(255, 255, 255, 0.12);
   opacity: 1;
-  transform: translateY(0);
+  transform: scale(1.06);
+}
+
+.message-copy-button:active {
+  transform: scale(0.94);
+}
+
+.message-copy-button:disabled {
+  cursor: default;
+}
+
+.message-copy-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.word-fade {
+  display: inline-block;
+  opacity: 0;
+  animation-name: wordFadeIn;
+  animation-timing-function: ease;
+  animation-fill-mode: forwards;
+}
+
+.message-search-match .bubble {
+  box-shadow:
+    0 0 0 1px rgba(174, 184, 255, 0.44),
+    0 10px 28px rgba(0, 0, 0, 0.26);
+}
+
+.message-search-current .bubble {
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.66),
+    0 0 24px rgba(88, 101, 255, 0.22),
+    0 10px 28px rgba(0, 0, 0, 0.26);
+}
+
+.message-search-dim {
+  opacity: 0.38;
 }
 
 .message.typing .bubble {
@@ -1174,6 +1333,24 @@ input:focus-visible {
   }
 }
 
+@keyframes welcomeWordIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes wordFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes starDrift {
   from {
     transform: translate3d(0, 0, 0);
@@ -1189,7 +1366,67 @@ input:focus-visible {
   }
 
   .sidebar {
-    display: none;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 6;
+    display: grid;
+    width: min(292px, 86vw);
+    transform: translateX(calc(-100% - 18px));
+    transition: transform 300ms cubic-bezier(0.2, 0.9, 0.2, 1);
+    box-shadow:
+      24px 0 70px rgba(0, 0, 0, 0.52),
+      inset -1px 0 rgba(255, 255, 255, 0.1),
+      inset 0 1px rgba(255, 255, 255, 0.1);
+  }
+
+  .app-shell.sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .sidebar-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    display: block;
+    background: rgba(0, 0, 0, 0.56);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 260ms ease;
+  }
+
+  .app-shell.sidebar-open .sidebar-scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .mobile-sidebar-button {
+    display: inline-grid;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.07);
+    box-shadow:
+      inset 0 1px rgba(255, 255, 255, 0.08),
+      0 10px 24px rgba(0, 0, 0, 0.24);
+    transition:
+      background 160ms ease,
+      transform 160ms ease,
+      box-shadow 160ms ease;
+  }
+
+  .mobile-sidebar-button:hover,
+  .mobile-sidebar-button:focus-visible {
+    background: rgba(255, 255, 255, 0.13);
+    box-shadow:
+      inset 0 1px rgba(255, 255, 255, 0.1),
+      0 12px 28px rgba(0, 0, 0, 0.3);
+    transform: scale(1.04);
+  }
+
+  .mobile-sidebar-icon {
+    width: 16px;
+    height: 16px;
   }
 
   .chat-log,
@@ -1198,7 +1435,24 @@ input:focus-visible {
   }
 
   .top-bar {
+    gap: 10px;
     padding: 0 14px;
+  }
+
+  .message-search {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
+  .connection-pill {
+    max-width: 168px;
+  }
+
+  .connection-pill strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
@@ -1211,8 +1465,13 @@ input:focus-visible {
     top: 36%;
   }
 
+  .empty-state h1 {
+    max-width: calc(100vw - 36px);
+    font-size: clamp(2.04rem, 10vw, 3.05rem);
+  }
+
   .composer-zone {
-    margin-bottom: 16px;
+    margin-bottom: max(16px, env(safe-area-inset-bottom));
   }
 
   .composer {
@@ -1220,7 +1479,34 @@ input:focus-visible {
   }
 
   .bubble {
-    max-width: 88%;
+    max-width: 92%;
+  }
+
+  .message-search {
+    grid-template-columns: 16px minmax(0, 1fr);
+    gap: 7px;
+    padding: 0 9px;
+  }
+
+  .message-search-count {
+    display: none;
+  }
+
+  .connection-pill {
+    max-width: 38px;
+    padding: 0 10px;
+  }
+
+  .connection-pill strong {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 }
 

@@ -4,13 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI</title>
-    <link rel="stylesheet" href="./web/styles.css?v=markdown">
+    <link rel="stylesheet" href="./web/styles.css?v=responsiveactions">
   </head>
   <body>
     <div class="app-shell">
       <div class="star-field" id="starField" aria-hidden="true"></div>
 
-      <aside class="sidebar" aria-label="Learny navigation">
+      <aside class="sidebar" id="sidebar" aria-label="Learny navigation">
         <header class="sidebar-header">
           <strong>Learny AI</strong>
           <button class="sidebar-toggle" type="button" title="Collapse sidebar">
@@ -48,9 +48,25 @@
         </section>
 
       </aside>
+      <button class="sidebar-scrim" id="sidebarScrim" type="button" aria-label="Close sidebar"></button>
 
       <main class="main-area">
         <header class="top-bar">
+          <button class="mobile-sidebar-button" id="mobileSidebarButton" type="button" title="Open sidebar">
+            <img class="ui-icon mobile-sidebar-icon" src="./icon_library/collapse.png" alt="" aria-hidden="true">
+            <span class="sr-only">Open sidebar</span>
+          </button>
+          <label class="message-search" for="messageSearchInput">
+            <img class="ui-icon message-search-icon" src="./icon_library/search.png" alt="" aria-hidden="true">
+            <input
+              id="messageSearchInput"
+              type="search"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Search this chat"
+            >
+            <span class="message-search-count" id="messageSearchCount" aria-live="polite"></span>
+          </label>
           <div class="connection-pill" id="connectionPill">
             <span></span>
             <strong>Checking server status...</strong>
@@ -60,8 +76,7 @@
         <section class="chat-panel" aria-label="Learny chat">
           <div class="chat-log" id="chatLog" aria-live="polite">
             <div class="empty-state" id="emptyState">
-              <h1>I'm Learny!</h1>
-              <h2>What's on your mind?</h2>
+              <h1 id="welcomeHeading">Hey! I'm Learny!</h1>
             </div>
           </div>
 
@@ -97,7 +112,7 @@
       </article>
     </template>
 
-    <script src="./web/markdown.js?v=markdown" defer></script>
-    <script src="./web/app.js?v=markdown" defer></script>
+    <script src="./web/markdown.js?v=responsiveactions" defer></script>
+    <script src="./web/app.js?v=responsiveactions" defer></script>
   </body>
 </html>

@@ -10,10 +10,26 @@ const chatSearchInput = document.querySelector("#chatSearchInput");
 const emptyState = document.querySelector("#emptyState");
 const newChatButton = document.querySelector("#newChatButton");
 const starField = document.querySelector("#starField");
+const appShell = document.querySelector(".app-shell");
+const sidebarToggle = document.querySelector(".sidebar-toggle");
+const mobileSidebarButton = document.querySelector("#mobileSidebarButton");
+const sidebarScrim = document.querySelector("#sidebarScrim");
+const messageSearchInput = document.querySelector("#messageSearchInput");
+const messageSearchCount = document.querySelector("#messageSearchCount");
+const welcomeHeading = document.querySelector("#welcomeHeading");
 
 const CHATS_KEY = "learny-chats";
 const ACTIVE_CHAT_KEY = "learny-active-chat-id";
 const SESSION_KEY = "learny-session-id";
+const COPY_ICON_PATH = "./icon_library/copy.png";
+const CHECK_ICON_PATH = "./icon_library/check.png";
+const COPY_RESET_DELAY_MS = 1400;
+const WORD_REVEAL_STEP_MS = 52;
+const WORD_REVEAL_DURATION_MS = 300;
+const WELCOME_TEXTS = ["Hey! I'm Learny!", "What's on your mind"];
+const WELCOME_SWAP_INTERVAL_MS = 3000;
+const WELCOME_SWAP_FADE_MS = 260;
+const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_CHECK_INTERVAL_MS = 15000;
 const STATUS_FETCH_TIMEOUT_MS = 8000;
@@ -45,7 +61,14 @@ let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
 let sessionId = "";
 let isSending = false;
 let chatSearchQuery = "";
+let messageSearchQuery = "";
+let messageSearchIndex = 0;
 let activeApiBase = "";
+let welcomeTextIndex = 0;
+let welcomeIntervalId = null;
+const mobileSidebarMedia = window.matchMedia
+  ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
+  : null;
 
 function createId(prefix) {
   const randomPart = Math.random().toString(36).slice(2, 10);
@@ -86,6 +109,259 @@ function createStarField() {
   }
 
   starField.append(fragment);
+}
+
+function escapePlainText(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/\n/g, "<br>");
+}
+
+function renderMessageHtml(text) {
+  return window.LearnyMarkdown && typeof window.LearnyMarkdown.renderMarkdown === "function"
+    ? window.LearnyMarkdown.renderMarkdown(text)
+    : escapePlainText(text);
+}
+
+function animateWords(container) {
+  if (!container || !("NodeFilter" in window)) {
+    return 0;
+  }
+
+  const textNodes = [];
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      if (!node.nodeValue || !node.nodeValue.trim()) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      if (node.parentElement && node.parentElement.closest("pre, code, script, style")) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+
+  while (walker.nextNode()) {
+    textNodes.push(walker.currentNode);
+  }
+
+  let wordIndex = 0;
+  textNodes.forEach((node) => {
+    const fragment = document.createDocumentFragment();
+    node.nodeValue.split(/(\s+)/).forEach((part) => {
+      if (!part) {
+        return;
+      }
+      if (/^\s+$/.test(part)) {
+        fragment.append(document.createTextNode(part));
+        return;
+      }
+
+      const word = document.createElement("span");
+      word.className = "word-fade";
+      word.style.animationDelay = `${wordIndex * WORD_REVEAL_STEP_MS}ms`;
+      word.style.animationDuration = `${WORD_REVEAL_DURATION_MS}ms`;
+      word.textContent = part;
+      fragment.append(word);
+      wordIndex += 1;
+    });
+    node.replaceWith(fragment);
+  });
+
+  return wordIndex;
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+function setCopyButtonState(button, copied) {
+  const icon = button.querySelector("img");
+  if (!icon) {
+    return;
+  }
+  icon.src = copied ? CHECK_ICON_PATH : COPY_ICON_PATH;
+  button.classList.toggle("copied", copied);
+  button.title = copied ? "Copied" : "Copy message";
+  button.setAttribute("aria-label", copied ? "Copied" : "Copy message");
+}
+
+async function handleCopyMessage(button, text) {
+  button.disabled = true;
+  try {
+    await copyTextToClipboard(text);
+    setCopyButtonState(button, true);
+    window.setTimeout(() => {
+      setCopyButtonState(button, false);
+      button.disabled = false;
+    }, COPY_RESET_DELAY_MS);
+  } catch (error) {
+    setCopyButtonState(button, false);
+    button.disabled = false;
+  }
+}
+
+function clearMessageSearch() {
+  messageSearchQuery = "";
+  messageSearchIndex = 0;
+  if (messageSearchInput) {
+    messageSearchInput.value = "";
+  }
+  updateMessageSearch();
+}
+
+function messageMatchesCurrentSearch(node, query) {
+  const text = node.dataset.searchText || "";
+  return text.includes(query);
+}
+
+function updateMessageSearch({ scrollToCurrent = false } = {}) {
+  if (!chatLog || !messageSearchCount) {
+    return;
+  }
+
+  const query = messageSearchQuery.trim().toLowerCase();
+  const messages = [...chatLog.querySelectorAll(".message:not(.typing)")];
+  const matches = [];
+
+  messages.forEach((node) => {
+    node.classList.remove("message-search-match", "message-search-dim", "message-search-current");
+    if (!query) {
+      return;
+    }
+
+    if (messageMatchesCurrentSearch(node, query)) {
+      node.classList.add("message-search-match");
+      matches.push(node);
+    } else {
+      node.classList.add("message-search-dim");
+    }
+  });
+
+  if (!query) {
+    messageSearchCount.textContent = "";
+    return;
+  }
+
+  if (matches.length === 0) {
+    messageSearchCount.textContent = "0";
+    messageSearchIndex = 0;
+    return;
+  }
+
+  messageSearchIndex = Math.min(Math.max(messageSearchIndex, 0), matches.length - 1);
+  const current = matches[messageSearchIndex];
+  current.classList.add("message-search-current");
+  messageSearchCount.textContent = `${messageSearchIndex + 1}/${matches.length}`;
+
+  if (scrollToCurrent) {
+    current.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+function cycleMessageSearch(direction) {
+  const query = messageSearchQuery.trim().toLowerCase();
+  if (!query) {
+    return;
+  }
+
+  const matches = [...chatLog.querySelectorAll(".message:not(.typing)")].filter((node) =>
+    messageMatchesCurrentSearch(node, query),
+  );
+  if (matches.length === 0) {
+    updateMessageSearch();
+    return;
+  }
+
+  messageSearchIndex = (messageSearchIndex + direction + matches.length) % matches.length;
+  updateMessageSearch({ scrollToCurrent: true });
+}
+
+function renderWelcomeHeadingText(text) {
+  if (!welcomeHeading) {
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  text.split(/(\s+)/).forEach((part, index) => {
+    if (!part) {
+      return;
+    }
+    if (/^\s+$/.test(part)) {
+      fragment.append(document.createTextNode(part));
+      return;
+    }
+    const word = document.createElement("span");
+    word.className = "welcome-word";
+    word.style.animationDelay = `${index * 38}ms`;
+    word.textContent = part;
+    fragment.append(word);
+  });
+  welcomeHeading.replaceChildren(fragment);
+}
+
+function startWelcomeHeadingCycle() {
+  if (!welcomeHeading || WELCOME_TEXTS.length < 2 || welcomeIntervalId) {
+    return;
+  }
+
+  renderWelcomeHeadingText(WELCOME_TEXTS[welcomeTextIndex]);
+  welcomeIntervalId = window.setInterval(() => {
+    welcomeHeading.classList.add("is-changing");
+    window.setTimeout(() => {
+      welcomeTextIndex = (welcomeTextIndex + 1) % WELCOME_TEXTS.length;
+      renderWelcomeHeadingText(WELCOME_TEXTS[welcomeTextIndex]);
+      welcomeHeading.classList.remove("is-changing");
+    }, WELCOME_SWAP_FADE_MS);
+  }, WELCOME_SWAP_INTERVAL_MS);
+}
+
+function isMobileSidebarLayout() {
+  return Boolean(mobileSidebarMedia && mobileSidebarMedia.matches);
+}
+
+function setSidebarOpen(open) {
+  if (!appShell) {
+    return;
+  }
+
+  const shouldOpen = Boolean(open && isMobileSidebarLayout());
+  appShell.classList.toggle("sidebar-open", shouldOpen);
+  document.body.classList.toggle("sidebar-lock", shouldOpen);
+  if (mobileSidebarButton) {
+    mobileSidebarButton.setAttribute("aria-expanded", String(shouldOpen));
+    mobileSidebarButton.title = shouldOpen ? "Close sidebar" : "Open sidebar";
+  }
+}
+
+function closeSidebarOnMobile() {
+  if (isMobileSidebarLayout()) {
+    setSidebarOpen(false);
+  }
+}
+
+function syncSidebarForViewport() {
+  if (!isMobileSidebarLayout()) {
+    setSidebarOpen(false);
+  }
 }
 
 function loadStoredChats() {
@@ -245,6 +521,7 @@ function clearChatSearch() {
 
 function createChat() {
   clearChatSearch();
+  clearMessageSearch();
   const chat = {
     id: createId("chat"),
     title: "New chat",
@@ -260,6 +537,7 @@ function createChat() {
   saveChats();
   renderChatList();
   renderActiveChat();
+  closeSidebarOnMobile();
   messageInput.focus();
   return chat;
 }
@@ -284,8 +562,10 @@ function openChat(chatId) {
   sessionId = chat.sessionId;
   localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
   localStorage.setItem(SESSION_KEY, sessionId);
+  clearMessageSearch();
   renderChatList();
   renderActiveChat();
+  closeSidebarOnMobile();
   messageInput.focus();
 }
 
@@ -314,41 +594,62 @@ function deleteChat(chatId) {
   saveChats();
   renderChatList();
   renderActiveChat();
+  if (deletingActiveChat) {
+    clearMessageSearch();
+  }
 }
 
 function clearMessages() {
   chatLog.querySelectorAll(".message").forEach((message) => message.remove());
 }
 
-function displayMessage({ speaker, text, source = "", thoughtSeconds = null }) {
+function displayMessage(
+  { speaker, text, source = "", thoughtSeconds = null },
+  { animateWords: shouldAnimateWords = false } = {},
+) {
   setEmptyState(false);
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
   node.classList.add(speaker === "You" ? "user" : "learny");
+  node.dataset.searchText = `${speaker} ${source} ${text}`.toLowerCase();
   node.querySelector(".speaker").textContent = speaker;
   node.querySelector(".source").textContent = source === "error" ? "" : source;
   const bubble = node.querySelector(".bubble");
   const textNode = document.createElement("div");
   textNode.className = "bubble-text markdown-body";
-  textNode.innerHTML =
-    window.LearnyMarkdown && typeof window.LearnyMarkdown.renderMarkdown === "function"
-      ? window.LearnyMarkdown.renderMarkdown(text)
-      : String(text ?? "")
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;")
-          .replace(/\n/g, "<br>");
+  textNode.innerHTML = renderMessageHtml(text);
+  if (shouldAnimateWords && speaker === "Learny") {
+    animateWords(textNode);
+  }
   bubble.replaceChildren(textNode);
 
   if (speaker === "Learny") {
+    const footer = document.createElement("div");
+    footer.className = "message-footer";
+
     const thought = document.createElement("span");
     thought.className = "thought-time";
     thought.textContent = `Thought for ${formatThoughtSeconds(thoughtSeconds)} seconds`;
-    bubble.append(thought);
+
+    const copyButton = document.createElement("button");
+    copyButton.className = "message-copy-button";
+    copyButton.type = "button";
+    copyButton.title = "Copy message";
+    copyButton.setAttribute("aria-label", "Copy message");
+
+    const copyIcon = document.createElement("img");
+    copyIcon.className = "ui-icon message-copy-icon";
+    copyIcon.src = COPY_ICON_PATH;
+    copyIcon.alt = "";
+    copyIcon.setAttribute("aria-hidden", "true");
+
+    copyButton.append(copyIcon);
+    copyButton.addEventListener("click", () => handleCopyMessage(copyButton, text));
+    footer.append(thought, copyButton);
+    bubble.append(footer);
   }
 
   chatLog.append(node);
+  updateMessageSearch();
   chatLog.scrollTop = chatLog.scrollHeight;
   return node;
 }
@@ -366,8 +667,8 @@ function saveMessage(message) {
   renderChatList();
 }
 
-function addMessage(message, { persist = true } = {}) {
-  const node = displayMessage(message);
+function addMessage(message, { persist = true, animateWords = false } = {}) {
+  const node = displayMessage(message, { animateWords });
   if (persist) {
     saveMessage(message);
   }
@@ -379,9 +680,11 @@ function renderActiveChat() {
   const chat = getActiveChat();
   if (!chat || chat.messages.length === 0) {
     setEmptyState(true);
+    updateMessageSearch();
     return;
   }
   chat.messages.forEach((message) => displayMessage(message));
+  updateMessageSearch();
 }
 
 function renderChatList() {
@@ -663,7 +966,7 @@ async function askLearny(message) {
           text: data.answer,
           source: sourceLabel(),
           thoughtSeconds,
-        });
+        }, { animateWords: true });
         await loadStatus();
         completed = true;
       } catch (error) {
@@ -730,6 +1033,58 @@ if (chatSearchInput) {
   });
 }
 
+if (messageSearchInput) {
+  messageSearchInput.addEventListener("input", () => {
+    messageSearchQuery = messageSearchInput.value;
+    messageSearchIndex = 0;
+    updateMessageSearch({ scrollToCurrent: Boolean(messageSearchQuery.trim()) });
+  });
+
+  messageSearchInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+    event.preventDefault();
+    cycleMessageSearch(event.shiftKey ? -1 : 1);
+  });
+}
+
+if (mobileSidebarButton) {
+  mobileSidebarButton.setAttribute("aria-controls", "sidebar");
+  mobileSidebarButton.setAttribute("aria-expanded", "false");
+  mobileSidebarButton.addEventListener("click", () => {
+    setSidebarOpen(!appShell.classList.contains("sidebar-open"));
+  });
+}
+
+if (sidebarScrim) {
+  sidebarScrim.addEventListener("click", () => setSidebarOpen(false));
+}
+
+if (sidebarToggle) {
+  sidebarToggle.setAttribute("aria-controls", "sidebar");
+  sidebarToggle.addEventListener("click", () => {
+    if (isMobileSidebarLayout()) {
+      setSidebarOpen(false);
+    }
+  });
+}
+
+if (mobileSidebarMedia) {
+  if (typeof mobileSidebarMedia.addEventListener === "function") {
+    mobileSidebarMedia.addEventListener("change", syncSidebarForViewport);
+  } else if (typeof mobileSidebarMedia.addListener === "function") {
+    mobileSidebarMedia.addListener(syncSidebarForViewport);
+  }
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    setSidebarOpen(false);
+  }
+});
+
+startWelcomeHeadingCycle();
 createStarField();
 
 if (!getActiveChat() && chats.length > 0) {
