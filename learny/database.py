@@ -16,6 +16,8 @@ from .conversation import ConversationHistory
 
 PASSWORD_ITERATIONS = 210_000
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
+RATE_LIMIT_LIMIT = 25
+RATE_LIMIT_WINDOW_MS = 60_000
 
 
 class AccountError(ValueError):
@@ -102,12 +104,20 @@ class LearnyDatabase:
                     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS rate_limit_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    identity_key TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_account_sessions_account_id
                     ON account_sessions(account_id);
                 CREATE INDEX IF NOT EXISTS idx_chats_account_updated
                     ON chats(account_id, updated_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_messages_account_chat_id
                     ON messages(account_id, chat_id, id);
+                CREATE INDEX IF NOT EXISTS idx_rate_limit_identity_created
+                    ON rate_limit_events(identity_key, created_at);
                 """
             )
             self._ensure_profile_picture_column(connection)
@@ -295,6 +305,16 @@ class LearnyDatabase:
             "messages": int(message_count),
             "sessions": int(session_count),
         }
+
+    def peek_rate_limit(self, identity_key: str) -> dict[str, Any]:
+        clean_identity_key = _clean_rate_limit_identity(identity_key)
+        with self._lock, self._connect() as connection:
+            return _sqlite_rate_limit_snapshot(connection, clean_identity_key, consume=False)
+
+    def consume_rate_limit(self, identity_key: str) -> dict[str, Any]:
+        clean_identity_key = _clean_rate_limit_identity(identity_key)
+        with self._lock, self._connect() as connection:
+            return _sqlite_rate_limit_snapshot(connection, clean_identity_key, consume=True)
 
     def list_chats(self, account_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
@@ -600,6 +620,72 @@ def _clean_thought_seconds(value: Any) -> float | None:
     if seconds < 0:
         return None
     return round(seconds, 1)
+
+
+def _clean_rate_limit_identity(identity_key: str) -> str:
+    clean_value = str(identity_key).strip()
+    if len(clean_value) < 3 or len(clean_value) > 160:
+        raise AccountError("Rate limit identity is invalid.")
+    if not all(character.isalnum() or character in ":-_" for character in clean_value):
+        raise AccountError("Rate limit identity is invalid.")
+    return clean_value
+
+
+def _rate_limit_payload(
+    *,
+    active_timestamps: list[int],
+    now: int,
+    allowed: bool,
+) -> dict[str, Any]:
+    active_timestamps.sort()
+    active_count = len(active_timestamps)
+    remaining = max(0, RATE_LIMIT_LIMIT - active_count)
+    reset_at = (
+        active_timestamps[0] + RATE_LIMIT_WINDOW_MS
+        if active_timestamps
+        else now + RATE_LIMIT_WINDOW_MS
+    )
+    return {
+        "limit": RATE_LIMIT_LIMIT,
+        "remaining": remaining,
+        "windowMs": RATE_LIMIT_WINDOW_MS,
+        "resetAt": reset_at,
+        "limited": remaining <= 0,
+        "allowed": allowed,
+    }
+
+
+def _sqlite_rate_limit_snapshot(
+    connection: sqlite3.Connection,
+    identity_key: str,
+    *,
+    consume: bool,
+) -> dict[str, Any]:
+    now = _now_ms()
+    window_start = now - RATE_LIMIT_WINDOW_MS
+    connection.execute("DELETE FROM rate_limit_events WHERE created_at <= ?", (window_start,))
+    rows = connection.execute(
+        """
+        SELECT created_at
+        FROM rate_limit_events
+        WHERE identity_key = ? AND created_at > ?
+        ORDER BY created_at ASC
+        """,
+        (identity_key, window_start),
+    ).fetchall()
+    active_timestamps = [int(row["created_at"]) for row in rows]
+
+    if len(active_timestamps) >= RATE_LIMIT_LIMIT:
+        return _rate_limit_payload(active_timestamps=active_timestamps, now=now, allowed=False)
+
+    if consume:
+        connection.execute(
+            "INSERT INTO rate_limit_events (identity_key, created_at) VALUES (?, ?)",
+            (identity_key, now),
+        )
+        active_timestamps.append(now)
+
+    return _rate_limit_payload(active_timestamps=active_timestamps, now=now, allowed=True)
 
 
 def _message_from_row(row: sqlite3.Row) -> dict[str, Any]:

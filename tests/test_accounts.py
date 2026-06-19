@@ -29,6 +29,18 @@ class StaticAnswerGenerator:
         )
 
 
+class CountingAnswerGenerator(StaticAnswerGenerator):
+    calls = 0
+
+    def generate(
+        self,
+        question: str,
+        history: ConversationHistory,
+    ) -> GeneratedAnswer:
+        type(self).calls += 1
+        return super().generate(question, history)
+
+
 class AccountWebTests(unittest.TestCase):
     def test_create_account_sets_cookie_and_reports_stats(self) -> None:
         with run_account_server() as server:
@@ -135,6 +147,90 @@ class AccountWebTests(unittest.TestCase):
             ["You", "Learny", "You", "Learny"],
         )
 
+    def test_rate_limit_blocks_26th_signed_in_ask_without_persisting(self) -> None:
+        CountingAnswerGenerator.calls = 0
+        with run_account_server(CountingAnswerGenerator) as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "limited_user", "password": "strong-password"},
+            )
+            for index in range(25):
+                response = server.post_json(
+                    "/api/ask",
+                    {
+                        "message": f"hello {index}",
+                        "chatId": "limited-chat",
+                        "sessionId": "limited-session",
+                    },
+                )
+                self.assertEqual(response["rateLimit"]["limit"], 25)
+
+            blocked = server.post_json_status(
+                "/api/ask",
+                {
+                    "message": "blocked",
+                    "chatId": "limited-chat",
+                    "sessionId": "limited-session",
+                },
+            )
+            chats = server.get_json("/api/chats")
+
+        self.assertEqual(blocked["status"], 429)
+        self.assertTrue(blocked["data"]["rateLimit"]["limited"])
+        self.assertGreaterEqual(int(blocked["headers"].get("Retry-After", "0")), 1)
+        self.assertEqual(CountingAnswerGenerator.calls, 25)
+        self.assertEqual(len(chats["chats"][0]["messages"]), 50)
+
+    def test_rate_limit_status_does_not_consume_guest_quota(self) -> None:
+        CountingAnswerGenerator.calls = 0
+        with run_account_server(CountingAnswerGenerator) as server:
+            status = server.get_json("/api/rate-limit")
+            rate_session_id = status["rateSessionId"]
+            headers = {"X-Learny-Rate-Session": rate_session_id}
+            for index in range(25):
+                response = server.post_json(
+                    "/api/ask",
+                    {"message": f"guest hello {index}", "sessionId": "guest-chat-session"},
+                    headers,
+                )
+                self.assertEqual(response["rateLimit"]["limit"], 25)
+
+            blocked = server.post_json_status(
+                "/api/ask",
+                {"message": "guest blocked", "sessionId": "guest-chat-session"},
+                headers,
+            )
+
+        self.assertEqual(status["rateLimit"]["remaining"], 25)
+        self.assertEqual(blocked["status"], 429)
+        self.assertTrue(blocked["data"]["rateLimit"]["limited"])
+        self.assertEqual(CountingAnswerGenerator.calls, 25)
+
+    def test_signed_in_rate_limit_survives_new_login_session(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "persistent_limit", "password": "strong-password"},
+            )
+            for index in range(25):
+                server.post_json(
+                    "/api/ask",
+                    {"message": f"hello {index}", "chatId": "persistent-chat"},
+                )
+
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/sign-in",
+                {"username": "persistent_limit", "password": "strong-password"},
+            )
+            blocked = server.post_json_status(
+                "/api/ask",
+                {"message": "blocked after sign in", "chatId": "persistent-chat"},
+            )
+
+        self.assertEqual(blocked["status"], 429)
+        self.assertTrue(blocked["data"]["rateLimit"]["limited"])
+
     def test_delete_account_removes_session_and_saved_chats(self) -> None:
         with run_account_server() as server:
             server.post_json(
@@ -199,8 +295,9 @@ class AccountWebTests(unittest.TestCase):
 
 
 class run_account_server:
-    def __init__(self) -> None:
+    def __init__(self, generator_factory: Any = StaticAnswerGenerator) -> None:
         self.temp_dir = TemporaryDirectory()
+        self.generator_factory = generator_factory
         self.server: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self.base_url = ""
@@ -222,7 +319,7 @@ class run_account_server:
         )
         config = WebServerConfig(
             static_dir=root,
-            generator_factory=StaticAnswerGenerator,
+            generator_factory=self.generator_factory,
             database_path=root / "learny-test.sqlite3",
         )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(config))
@@ -244,15 +341,49 @@ class run_account_server:
         with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
 
-    def post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def post_json(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **(headers or {})},
             method="POST",
         )
         with self.opener.open(request, timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def post_json_status(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", **(headers or {})},
+            method="POST",
+        )
+        try:
+            with self.opener.open(request, timeout=10) as response:
+                return {
+                    "status": int(response.status),
+                    "data": json.loads(response.read().decode("utf-8")),
+                    "headers": response.headers,
+                }
+        except urllib.error.HTTPError as error:
+            try:
+                return {
+                    "status": int(error.code),
+                    "data": json.loads(error.read().decode("utf-8")),
+                    "headers": error.headers,
+                }
+            finally:
+                error.close()
 
     def post_json_headers(
         self,

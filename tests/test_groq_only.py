@@ -188,7 +188,10 @@ class LearnyGroqOnlyTests(unittest.TestCase):
         self.assertEqual(data["model"], PRIMARY_GROQ_MODEL)
         self.assertFalse(data["retryable"])
         self.assertEqual(data["answer"], "Try a quick game, a short walk, or a small coding project.")
-        self.assertEqual(set(data), {"sessionId", "answer", "source", "model", "retryable"})
+        self.assertEqual(
+            set(data),
+            {"sessionId", "answer", "source", "model", "retryable", "rateSessionId", "rateLimit"},
+        )
 
     def test_failed_generator_chain_is_not_retried_by_browser(self) -> None:
         with run_test_server(NoAnswerGenerator) as base_url:

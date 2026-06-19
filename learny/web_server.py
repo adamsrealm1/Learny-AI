@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import secrets
+import time
 from dataclasses import dataclass
 from http import HTTPStatus
 from http.cookies import SimpleCookie
@@ -97,6 +98,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if route == "/api/account":
                 self._handle_account()
                 return
+            if route == "/api/rate-limit":
+                self._handle_rate_limit()
+                return
             if route == "/api/chats":
                 self._handle_get_chats()
                 return
@@ -135,7 +139,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
                 self.send_header(
                     "Access-Control-Allow-Headers",
-                    "Content-Type, X-Learny-Session",
+                    "Content-Type, X-Learny-Session, X-Learny-Rate-Session",
                 )
                 self.send_header("Access-Control-Max-Age", "86400")
                 self.end_headers()
@@ -258,6 +262,17 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 }
             )
 
+        def _handle_rate_limit(self) -> None:
+            account = self._current_account()
+            rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
+            rate_limit = database.peek_rate_limit(_rate_limit_identity(account, rate_session_id))
+            self._send_json(
+                {
+                    "rateSessionId": rate_session_id,
+                    "rateLimit": _public_rate_limit(rate_limit),
+                }
+            )
+
         def _handle_get_chats(self) -> None:
             account = self._current_account()
             if account is None:
@@ -299,6 +314,22 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 or self.headers.get("X-Learny-Session")
             )
             session_id, session_history = session_store.get(requested_session_id)
+            rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
+            rate_limit = database.consume_rate_limit(_rate_limit_identity(account, rate_session_id))
+            if not rate_limit.get("allowed", False):
+                self._send_json(
+                    {
+                        "sessionId": session_id,
+                        "rateSessionId": rate_session_id,
+                        "error": GENERIC_ERROR_MESSAGE,
+                        "retryable": False,
+                        "rateLimit": _public_rate_limit(rate_limit),
+                    },
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    extra_headers=[_retry_after_header(rate_limit)],
+                )
+                return
+
             if account is not None and chat_id:
                 database.ensure_chat(
                     int(account["id"]),
@@ -337,6 +368,8 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "source": response.source,
                     "model": response.model,
                     "retryable": False,
+                    "rateSessionId": rate_session_id,
+                    "rateLimit": _public_rate_limit(rate_limit),
                 }
             )
 
@@ -590,6 +623,36 @@ def _public_account(account: dict[str, Any]) -> dict[str, Any]:
         "createdAt": int(account["createdAt"]),
         "lastSeenAt": int(account["lastSeenAt"]),
     }
+
+
+def _rate_session_id(value: str | None) -> str:
+    return _clean_session_id(value) or secrets.token_urlsafe(18)
+
+
+def _rate_limit_identity(account: dict[str, Any] | None, rate_session_id: str) -> str:
+    if account is not None:
+        return f"account:{int(account['id'])}"
+    return f"session:{rate_session_id}"
+
+
+def _public_rate_limit(rate_limit: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "limit": int(rate_limit["limit"]),
+        "remaining": int(rate_limit["remaining"]),
+        "windowMs": int(rate_limit["windowMs"]),
+        "resetAt": int(rate_limit["resetAt"]),
+        "limited": bool(rate_limit["limited"]),
+    }
+
+
+def _retry_after_header(rate_limit: dict[str, Any]) -> tuple[str, str]:
+    reset_at = int(rate_limit.get("resetAt", _now_ms()))
+    retry_after_seconds = max(1, (reset_at - _now_ms() + 999) // 1000)
+    return ("Retry-After", str(retry_after_seconds))
+
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def _account_cookie_header(token: str, cross_site: bool = False) -> tuple[str, str]:

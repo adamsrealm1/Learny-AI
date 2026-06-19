@@ -12,18 +12,22 @@ from typing import Any
 
 from .conversation import ConversationHistory
 from .database import (
+    RATE_LIMIT_LIMIT,
+    RATE_LIMIT_WINDOW_MS,
     SESSION_MAX_AGE_SECONDS,
     AccountError,
     AuthenticationError,
     _clean_chat_payload,
     _clean_identifier,
     _clean_message_payload,
+    _clean_rate_limit_identity,
     _clean_title,
     _clean_username,
     _hash_password,
     _hash_token,
     _message_from_row,
     _now_ms,
+    _rate_limit_payload,
     _validate_password,
 )
 
@@ -151,6 +155,15 @@ class MySQLLearnyDatabase:
                 KEY idx_account_events_account_id (account_id),
                 CONSTRAINT fk_account_events_account
                     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS rate_limit_events (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                identity_key VARCHAR(160) NOT NULL,
+                created_at BIGINT NOT NULL,
+                PRIMARY KEY (id),
+                KEY idx_rate_limit_identity_created (identity_key, created_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
         ]
@@ -328,6 +341,45 @@ class MySQLLearnyDatabase:
                 session_count = int(cursor.fetchone()["value"])
 
         return {"chats": chat_count, "messages": message_count, "sessions": session_count}
+
+    def peek_rate_limit(self, identity_key: str) -> dict[str, Any]:
+        clean_identity_key = _clean_rate_limit_identity(identity_key)
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                return self._rate_limit_snapshot(cursor, clean_identity_key, consume=False)
+
+    def consume_rate_limit(self, identity_key: str) -> dict[str, Any]:
+        clean_identity_key = _clean_rate_limit_identity(identity_key)
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                return self._rate_limit_snapshot(cursor, clean_identity_key, consume=True)
+
+    def _rate_limit_snapshot(self, cursor: Any, identity_key: str, *, consume: bool) -> dict[str, Any]:
+        now = _now_ms()
+        window_start = now - RATE_LIMIT_WINDOW_MS
+        cursor.execute("DELETE FROM rate_limit_events WHERE created_at <= %s", (window_start,))
+        cursor.execute(
+            """
+            SELECT created_at
+            FROM rate_limit_events
+            WHERE identity_key = %s AND created_at > %s
+            ORDER BY created_at ASC
+            """,
+            (identity_key, window_start),
+        )
+        active_timestamps = [int(row["created_at"]) for row in cursor.fetchall()]
+
+        if len(active_timestamps) >= RATE_LIMIT_LIMIT:
+            return _rate_limit_payload(active_timestamps=active_timestamps, now=now, allowed=False)
+
+        if consume:
+            cursor.execute(
+                "INSERT INTO rate_limit_events (identity_key, created_at) VALUES (%s, %s)",
+                (identity_key, now),
+            )
+            active_timestamps.append(now)
+
+        return _rate_limit_payload(active_timestamps=active_timestamps, now=now, allowed=True)
 
     def list_chats(self, account_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:

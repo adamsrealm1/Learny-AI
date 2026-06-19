@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI</title>
-    <link rel="stylesheet" href="./web/styles.css?v=profilepic1">
+    <link rel="stylesheet" href="./web/styles.css?v=ratepaneldark1">
   </head>
   <body>
     <div class="app-shell">
@@ -48,6 +48,17 @@
             >
           </label>
           <div class="chat-list" id="chatList"></div>
+        </section>
+
+        <section class="rate-limit-panel" id="rateLimitPanel" aria-label="Message rate limit">
+          <div class="rate-limit-copy">
+            <span>Messages</span>
+            <strong id="rateLimitRemaining">25 / 25 messages left</strong>
+          </div>
+          <div class="rate-limit-track" aria-hidden="true">
+            <span id="rateLimitFill"></span>
+          </div>
+          <p id="rateLimitCountdown">Ready</p>
         </section>
 
       </aside>
@@ -222,7 +233,7 @@
       </article>
     </template>
 
-    <script src="./web/markdown.js?v=profilepic1" defer></script>
-    <script src="./web/app.js?v=profilepic1" defer></script>
+    <script src="./web/markdown.js?v=ratelimit1" defer></script>
+    <script src="./web/app.js?v=ratelimit1" defer></script>
   </body>
 </html>

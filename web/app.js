@@ -7,6 +7,10 @@ const connectionPill = document.querySelector("#connectionPill");
 const chatList = document.querySelector("#chatList");
 const addChatButton = document.querySelector("#addChatButton");
 const chatSearchInput = document.querySelector("#chatSearchInput");
+const rateLimitPanel = document.querySelector("#rateLimitPanel");
+const rateLimitRemaining = document.querySelector("#rateLimitRemaining");
+const rateLimitFill = document.querySelector("#rateLimitFill");
+const rateLimitCountdown = document.querySelector("#rateLimitCountdown");
 const emptyState = document.querySelector("#emptyState");
 const starField = document.querySelector("#starField");
 const appShell = document.querySelector(".app-shell");
@@ -46,6 +50,7 @@ const accountDeleteConfirmButton = document.querySelector("#accountDeleteConfirm
 const CHATS_KEY = "learny-chats";
 const ACTIVE_CHAT_KEY = "learny-active-chat-id";
 const SESSION_KEY = "learny-session-id";
+const RATE_LIMIT_SESSION_KEY = "learny-rate-limit-session-id";
 const COPY_ICON_PATH = "./icon_library/copy.png";
 const CHECK_ICON_PATH = "./icon_library/check.png";
 const X_ICON_PATH = "./icon_library/X.png";
@@ -68,6 +73,13 @@ const ASK_RETRY_MAX_DELAY_MS = 3500;
 const ASK_REQUEST_TIMEOUT_MS = 60000;
 const ASK_RETRY_MAX_ATTEMPTS = 4;
 const ASK_RETRY_MAX_ELAPSED_MS = 65000;
+const DEFAULT_RATE_LIMIT = {
+  limit: 25,
+  remaining: 25,
+  windowMs: 60000,
+  resetAt: 0,
+  limited: false,
+};
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
 const WASMER_API_BASE = "https://learny-ai-adamsrealm1.wasmer.app";
@@ -87,6 +99,7 @@ const PROMPT_META_MARKERS = [
 let chats = loadStoredChats();
 let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
 let sessionId = "";
+let rateLimitSessionId = localStorage.getItem(RATE_LIMIT_SESSION_KEY) || "";
 let isSending = false;
 let chatSearchQuery = "";
 let messageSearchQuery = "";
@@ -97,6 +110,8 @@ let welcomeTimeoutId = null;
 let welcomeSequenceStarted = false;
 let currentAccount = null;
 let currentAccountStats = null;
+let currentRateLimit = { ...DEFAULT_RATE_LIMIT };
+let rateLimitCountdownTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
 let activeAccountView = "";
@@ -548,6 +563,99 @@ function saveChats() {
   if (currentAccount && serverChatsLoaded) {
     queueServerChatSync();
   }
+}
+
+function normalizeRateLimit(rateLimit) {
+  if (!rateLimit || typeof rateLimit !== "object") {
+    return { ...DEFAULT_RATE_LIMIT };
+  }
+
+  const limit = Number.isFinite(rateLimit.limit) && rateLimit.limit > 0
+    ? Math.floor(rateLimit.limit)
+    : DEFAULT_RATE_LIMIT.limit;
+  const remaining = Number.isFinite(rateLimit.remaining)
+    ? Math.max(0, Math.min(limit, Math.floor(rateLimit.remaining)))
+    : limit;
+  const windowMs = Number.isFinite(rateLimit.windowMs) && rateLimit.windowMs > 0
+    ? Math.floor(rateLimit.windowMs)
+    : DEFAULT_RATE_LIMIT.windowMs;
+  const resetAt = Number.isFinite(rateLimit.resetAt) && rateLimit.resetAt > 0
+    ? Math.floor(rateLimit.resetAt)
+    : Date.now() + windowMs;
+
+  return {
+    limit,
+    remaining,
+    windowMs,
+    resetAt,
+    limited: Boolean(rateLimit.limited) && Date.now() < resetAt,
+  };
+}
+
+function isRateLimited() {
+  return Boolean(
+    currentRateLimit &&
+      currentRateLimit.limited &&
+      currentRateLimit.remaining <= 0 &&
+      Date.now() < currentRateLimit.resetAt,
+  );
+}
+
+function syncComposerAvailability() {
+  if (DIRECT_FILE_MODE) {
+    sendButton.disabled = true;
+    messageInput.disabled = true;
+    return;
+  }
+
+  const blocked = isRateLimited();
+  if (!isSending) {
+    sendButton.disabled = blocked;
+    messageInput.disabled = blocked;
+  }
+}
+
+function renderRateLimit() {
+  const rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT;
+  const limited = isRateLimited();
+  const fillRatio = rateLimit.limit > 0 ? rateLimit.remaining / rateLimit.limit : 1;
+  const secondsLeft = Math.max(0, Math.ceil((rateLimit.resetAt - Date.now()) / 1000));
+
+  if (rateLimitPanel) {
+    rateLimitPanel.classList.toggle("limited", limited);
+  }
+  if (rateLimitRemaining) {
+    rateLimitRemaining.textContent =
+      `${rateLimit.remaining} / ${rateLimit.limit} messages left`;
+  }
+  if (rateLimitFill) {
+    rateLimitFill.style.setProperty("--rate-fill", String(Math.max(0, Math.min(1, fillRatio))));
+  }
+  if (rateLimitCountdown) {
+    rateLimitCountdown.textContent = limited ? `Try again in ${secondsLeft}s` : "Ready";
+  }
+
+  if (rateLimitCountdownTimerId !== null) {
+    window.clearTimeout(rateLimitCountdownTimerId);
+    rateLimitCountdownTimerId = null;
+  }
+  if (limited) {
+    rateLimitCountdownTimerId = window.setTimeout(() => {
+      rateLimitCountdownTimerId = null;
+      if (Date.now() >= rateLimit.resetAt) {
+        loadRateLimit();
+        return;
+      }
+      renderRateLimit();
+    }, 1000);
+  }
+
+  syncComposerAvailability();
+}
+
+function updateRateLimit(rateLimit) {
+  currentRateLimit = normalizeRateLimit(rateLimit);
+  renderRateLimit();
 }
 
 function accountProfilePicture() {
@@ -1324,7 +1432,8 @@ function isApiResponseData(data) {
     "error" in data ||
     "authenticated" in data ||
     "account" in data ||
-    "chats" in data
+    "chats" in data ||
+    "rateLimit" in data
   );
 }
 
@@ -1397,6 +1506,9 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       if (sessionId && !("X-Learny-Session" in requestHeaders)) {
         requestHeaders["X-Learny-Session"] = sessionId;
       }
+      if (rateLimitSessionId && !("X-Learny-Rate-Session" in requestHeaders)) {
+        requestHeaders["X-Learny-Rate-Session"] = rateLimitSessionId;
+      }
 
       const response = await fetch(apiUrl(apiBase, path), {
         credentials: "include",
@@ -1413,7 +1525,12 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       }
 
       if (!response.ok) {
-        throw new Error(GENERIC_ERROR_MESSAGE);
+        const responseError = new Error(GENERIC_ERROR_MESSAGE);
+        responseError.status = response.status;
+        responseError.data = data;
+        responseError.retryable = data && typeof data === "object" ? data.retryable : undefined;
+        responseError.stopFallback = response.status === 429;
+        throw responseError;
       }
       if (!isApiResponseData(data)) {
         throw new Error(GENERIC_ERROR_MESSAGE);
@@ -1423,6 +1540,9 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       return data;
     } catch (error) {
       lastError = error;
+      if (error && error.stopFallback) {
+        throw error;
+      }
     } finally {
       if (timeoutId !== null) {
         window.clearTimeout(timeoutId);
@@ -1457,8 +1577,35 @@ async function loadStatus() {
   }
 }
 
+async function loadRateLimit() {
+  if (DIRECT_FILE_MODE) {
+    updateRateLimit(DEFAULT_RATE_LIMIT);
+    return;
+  }
+
+  try {
+    const data = await apiFetch(
+      "/api/rate-limit",
+      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    if (data.rateSessionId) {
+      rateLimitSessionId = data.rateSessionId;
+      localStorage.setItem(RATE_LIMIT_SESSION_KEY, rateLimitSessionId);
+    }
+    updateRateLimit(data.rateLimit);
+  } catch (error) {
+    updateRateLimit(DEFAULT_RATE_LIMIT);
+  }
+}
+
 async function askLearny(message) {
   if (DIRECT_FILE_MODE) {
+    return;
+  }
+
+  if (isRateLimited()) {
+    renderRateLimit();
     return;
   }
 
@@ -1495,6 +1642,11 @@ async function askLearny(message) {
         sessionId = data.sessionId;
         chat.sessionId = data.sessionId;
         localStorage.setItem(SESSION_KEY, sessionId);
+        if (data.rateSessionId) {
+          rateLimitSessionId = data.rateSessionId;
+          localStorage.setItem(RATE_LIMIT_SESSION_KEY, rateLimitSessionId);
+        }
+        updateRateLimit(data.rateLimit);
         saveChats();
         typing.remove();
         const thoughtSeconds = (performance.now() - thoughtStartedAt) / 1000;
@@ -1507,6 +1659,17 @@ async function askLearny(message) {
         await loadStatus();
         completed = true;
       } catch (error) {
+        if (error && error.status === 429 && error.data && error.data.rateLimit) {
+          typing.remove();
+          if (error.data.rateSessionId) {
+            rateLimitSessionId = error.data.rateSessionId;
+            localStorage.setItem(RATE_LIMIT_SESSION_KEY, rateLimitSessionId);
+          }
+          updateRateLimit(error.data.rateLimit);
+          completed = true;
+          continue;
+        }
+
         attempt += 1;
         const elapsed = performance.now() - thoughtStartedAt;
         const retryable = error.retryable !== false;
@@ -1535,9 +1698,10 @@ async function askLearny(message) {
     }
   } finally {
     isSending = false;
-    sendButton.disabled = false;
-    messageInput.disabled = false;
-    messageInput.focus();
+    syncComposerAvailability();
+    if (!isRateLimited()) {
+      messageInput.focus();
+    }
   }
 }
 
@@ -1573,6 +1737,7 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint) {
     currentAccountStats = data.stats || null;
     form.reset();
     await loadAccountAndChats();
+    await loadRateLimit();
     openAccountModal("myaccount");
   } catch (error) {
     setAccountFormMessage(messageNode, GENERIC_ERROR_MESSAGE, true);
@@ -1694,6 +1859,7 @@ async function handleAccountSignOut() {
     setConnection("offline", "Servers offline");
   } finally {
     clearSignedInLocalState();
+    await loadRateLimit();
     accountSignOutButton.disabled = false;
     accountSignOutButton.textContent = "Sign out";
     openAccountModal("sign-in");
@@ -1721,6 +1887,7 @@ async function handleAccountDelete() {
       throw new Error(GENERIC_ERROR_MESSAGE);
     }
     clearSignedInLocalState();
+    await loadRateLimit();
     openAccountModal("sign-in");
   } catch (error) {
     setConnection("offline", "Servers offline");
@@ -1738,6 +1905,10 @@ chatForm.addEventListener("submit", (event) => {
 
   const message = messageInput.value.trim();
   if (!message) {
+    return;
+  }
+  if (isRateLimited()) {
+    renderRateLimit();
     return;
   }
   messageInput.value = "";
@@ -1888,6 +2059,7 @@ if (activeChat) {
 }
 
 renderChatList();
+renderRateLimit();
 
 if (DIRECT_FILE_MODE) {
   addMessage(
@@ -1906,6 +2078,7 @@ if (DIRECT_FILE_MODE) {
 
 loadAccountAndChats();
 loadStatus();
+loadRateLimit();
 if (!DIRECT_FILE_MODE) {
   window.setInterval(loadStatus, STATUS_CHECK_INTERVAL_MS);
 }

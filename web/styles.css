@@ -131,7 +131,7 @@ input:focus-visible {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
   min-width: 0;
   min-height: 0;
@@ -856,6 +856,81 @@ body.account-modal-open {
   width: 0;
   height: 0;
   display: none;
+}
+
+.rate-limit-panel {
+  display: grid;
+  gap: 9px;
+  margin: 0 2px;
+  padding: 12px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.065), rgba(255, 255, 255, 0.022)),
+    rgba(4, 4, 7, 0.56);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.07),
+    0 16px 36px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  animation: sidebarItemIn 560ms 170ms ease both;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.rate-limit-panel.limited {
+  border-color: rgba(255, 107, 107, 0.24);
+  background:
+    radial-gradient(circle at 18% 0, rgba(255, 107, 107, 0.18), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.035)),
+    rgba(255, 107, 107, 0.04);
+}
+
+.rate-limit-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.rate-limit-copy span,
+.rate-limit-panel p {
+  margin: 0;
+  color: rgba(217, 220, 255, 0.68);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.rate-limit-copy strong {
+  color: #f7f7ff;
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.rate-limit-track {
+  position: relative;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+  overflow: hidden;
+}
+
+.rate-limit-track span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(235, 235, 245, 0.82), rgba(255, 255, 255, 0.96));
+  box-shadow: none;
+  transform-origin: left center;
+  transform: scaleX(var(--rate-fill, 1));
+  transition:
+    transform 360ms cubic-bezier(0.2, 0.9, 0.2, 1),
+    background 180ms ease;
+}
+
+.rate-limit-panel.limited .rate-limit-track span {
+  background: linear-gradient(90deg, #ff6b6b, #ffb36b);
 }
 
 .chat-item {
@@ -1785,7 +1860,8 @@ body.account-modal-open {
 
   .app-shell.sidebar-collapsed .sidebar-header strong,
   .app-shell.sidebar-collapsed .account-button,
-  .app-shell.sidebar-collapsed .chats-panel {
+  .app-shell.sidebar-collapsed .chats-panel,
+  .app-shell.sidebar-collapsed .rate-limit-panel {
     display: none;
   }
 
