@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI</title>
-    <link rel="stylesheet" href="./web/styles.css?v=wasmerdb6">
+    <link rel="stylesheet" href="./web/styles.css?v=profilepic1">
   </head>
   <body>
     <div class="app-shell">
@@ -21,7 +21,7 @@
 
         <button class="account-button" id="accountButton" type="button">
           <span class="account-orb" aria-hidden="true">
-            <img src="./icon_library/profile.png" alt="">
+            <img id="accountOrbImage" src="./icon_library/profile.png" alt="">
           </span>
           <span class="account-copy">
             <strong>Account</strong>
@@ -160,7 +160,7 @@
         <div class="account-modal-view" data-account-view="myaccount" hidden>
           <div class="account-profile-summary">
             <div class="account-avatar-large" id="accountAvatarLarge" aria-hidden="true">
-              <img src="./icon_library/profile.png" alt="">
+              <img id="accountAvatarImage" src="./icon_library/profile.png" alt="">
             </div>
             <div>
               <p class="account-modal-kicker">Signed in as</p>
@@ -189,10 +189,19 @@
               <h3>Settings</h3>
               <p>Manage this Learny account and its database-backed chat memory.</p>
             </div>
+            <input
+              id="accountProfilePictureInput"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              hidden
+            >
+            <button class="account-secondary-action" id="accountProfilePictureButton" type="button">
+              Add profile picture
+            </button>
             <button class="account-secondary-action" id="accountSignOutButton" type="button">Sign out</button>
             <button class="account-danger-action" id="accountDeleteButton" type="button">Delete account</button>
             <div class="account-danger-confirm" id="accountDeleteConfirm" hidden>
-              <p>This deletes the account, sessions, and saved chats from the SQLite database.</p>
+              <p>This deletes the account, sessions, and saved chats from the database.</p>
               <div>
                 <button class="account-secondary-action" id="accountDeleteCancel" type="button">Cancel</button>
                 <button class="account-danger-action solid" id="accountDeleteConfirmButton" type="button">Delete forever</button>
@@ -213,7 +222,7 @@
       </article>
     </template>
 
-    <script src="./web/markdown.js?v=wasmerdb6" defer></script>
-    <script src="./web/app.js?v=wasmerdb6" defer></script>
+    <script src="./web/markdown.js?v=profilepic1" defer></script>
+    <script src="./web/app.js?v=profilepic1" defer></script>
   </body>
 </html>

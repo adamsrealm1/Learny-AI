@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import json
 import mimetypes
 import os
@@ -43,6 +45,14 @@ ALLOWED_CORS_ORIGINS = {
     "https://learny-ai.wasmer.app",
     "https://learny-ai-adamsrealm1.wasmer.app",
 }
+PROFILE_PICTURE_MAX_BYTES = 512 * 1024
+PROFILE_PICTURE_MAX_BODY_BYTES = 800_000
+PROFILE_PICTURE_PREFIXES = (
+    "data:image/png;base64,",
+    "data:image/jpeg;base64,",
+    "data:image/webp;base64,",
+    "data:image/gif;base64,",
+)
 
 
 @dataclass(frozen=True)
@@ -108,6 +118,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 return
             if route == "/api/accounts/delete":
                 self._handle_delete_account()
+                return
+            if route == "/api/account/profile-picture":
+                self._handle_profile_picture()
                 return
             if route == "/api/chats/sync":
                 self._handle_sync_chats()
@@ -221,6 +234,28 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 {"deleted": True, "authenticated": False, "account": None, "stats": None},
                 extra_headers=[_clear_account_cookie_header(self._needs_cross_site_cookie())],
+            )
+
+        def _handle_profile_picture(self) -> None:
+            account = self._current_account()
+            if account is None:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+
+            try:
+                body = self._read_json_body(max_bytes=PROFILE_PICTURE_MAX_BODY_BYTES)
+                profile_picture = _clean_profile_picture(body.get("profilePicture"))
+                updated_account = database.update_profile_picture(int(account["id"]), profile_picture)
+            except (ValueError, AccountError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+
+            self._send_json(
+                {
+                    "authenticated": True,
+                    "account": _public_account(updated_account),
+                    "stats": database.account_stats(int(account["id"])),
+                }
             )
 
         def _handle_get_chats(self) -> None:
@@ -348,11 +383,11 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             token = morsel.value.strip()
             return token or None
 
-        def _read_json_body(self) -> dict[str, Any]:
+        def _read_json_body(self, max_bytes: int = 64_000) -> dict[str, Any]:
             content_length = int(self.headers.get("Content-Length", "0"))
             if content_length <= 0:
                 raise ValueError("Request body is required.")
-            if content_length > 64_000:
+            if content_length > max_bytes:
                 raise ValueError("Request body is too large.")
 
             raw_body = self.rfile.read(content_length).decode("utf-8")
@@ -509,6 +544,35 @@ def _optional_string(body: dict[str, Any], key: str) -> str | None:
     return None
 
 
+def _clean_profile_picture(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("profilePicture must be a string or null.")
+
+    clean_value = value.strip()
+    if not clean_value:
+        return None
+    if len(clean_value) > PROFILE_PICTURE_MAX_BODY_BYTES:
+        raise ValueError("profilePicture is too large.")
+
+    prefix = next(
+        (candidate for candidate in PROFILE_PICTURE_PREFIXES if clean_value.startswith(candidate)),
+        None,
+    )
+    if prefix is None:
+        raise ValueError("profilePicture type is not supported.")
+
+    try:
+        decoded = base64.b64decode(clean_value[len(prefix):], validate=True)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("profilePicture is invalid.") from error
+
+    if not decoded or len(decoded) > PROFILE_PICTURE_MAX_BYTES:
+        raise ValueError("profilePicture is too large.")
+    return clean_value
+
+
 def _clean_session_id(session_id: str | None) -> str | None:
     if session_id is None:
         return None
@@ -519,8 +583,10 @@ def _clean_session_id(session_id: str | None) -> str | None:
 
 
 def _public_account(account: dict[str, Any]) -> dict[str, Any]:
+    profile_picture = account.get("profilePicture", account.get("profile_picture"))
     return {
         "username": str(account["username"]),
+        "profilePicture": str(profile_picture) if profile_picture else None,
         "createdAt": int(account["createdAt"]),
         "lastSeenAt": int(account["lastSeenAt"]),
     }

@@ -92,6 +92,7 @@ class MySQLLearnyDatabase:
                 username_key VARCHAR(24) NOT NULL,
                 password_salt VARCHAR(64) NOT NULL,
                 password_hash VARCHAR(128) NOT NULL,
+                profile_picture MEDIUMTEXT NULL,
                 created_at BIGINT NOT NULL,
                 last_seen_at BIGINT NOT NULL,
                 PRIMARY KEY (id),
@@ -157,6 +158,11 @@ class MySQLLearnyDatabase:
             with connection.cursor() as cursor:
                 for statement in statements:
                     cursor.execute(statement)
+                cursor.execute("SHOW COLUMNS FROM accounts LIKE 'profile_picture'")
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        "ALTER TABLE accounts ADD COLUMN profile_picture MEDIUMTEXT NULL AFTER password_hash"
+                    )
 
     def create_account(self, username: str, password: str) -> dict[str, Any]:
         username = _clean_username(username)
@@ -185,7 +191,13 @@ class MySQLLearnyDatabase:
                     (account_id, "created", now),
                 )
 
-        return {"id": account_id, "username": username, "createdAt": now, "lastSeenAt": now}
+        return {
+            "id": account_id,
+            "username": username,
+            "profilePicture": None,
+            "createdAt": now,
+            "lastSeenAt": now,
+        }
 
     def authenticate(self, username: str, password: str) -> dict[str, Any]:
         username = _clean_username(username)
@@ -211,6 +223,28 @@ class MySQLLearnyDatabase:
         return {
             "id": account_id,
             "username": str(row["username"]),
+            "profilePicture": row.get("profile_picture"),
+            "createdAt": int(row["created_at"]),
+            "lastSeenAt": now,
+        }
+
+    def update_profile_picture(self, account_id: int, profile_picture: str | None) -> dict[str, Any]:
+        now = _now_ms()
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE accounts SET profile_picture = %s, last_seen_at = %s WHERE id = %s",
+                    (profile_picture, now, account_id),
+                )
+                cursor.execute("SELECT * FROM accounts WHERE id = %s", (account_id,))
+                row = cursor.fetchone()
+
+        if row is None:
+            raise AccountError("Account could not be updated.")
+        return {
+            "id": int(row["id"]),
+            "username": str(row["username"]),
+            "profilePicture": row.get("profile_picture"),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -271,6 +305,7 @@ class MySQLLearnyDatabase:
         return {
             "id": account_id,
             "username": str(row["username"]),
+            "profilePicture": row.get("profile_picture"),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }

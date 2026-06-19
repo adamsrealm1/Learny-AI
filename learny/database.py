@@ -58,6 +58,7 @@ class LearnyDatabase:
                     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
                     password_salt TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
+                    profile_picture TEXT,
                     created_at INTEGER NOT NULL,
                     last_seen_at INTEGER NOT NULL
                 );
@@ -109,6 +110,15 @@ class LearnyDatabase:
                     ON messages(account_id, chat_id, id);
                 """
             )
+            self._ensure_profile_picture_column(connection)
+
+    def _ensure_profile_picture_column(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(accounts)").fetchall()
+        }
+        if "profile_picture" not in columns:
+            connection.execute("ALTER TABLE accounts ADD COLUMN profile_picture TEXT")
 
     def create_account(self, username: str, password: str) -> dict[str, Any]:
         username = _clean_username(username)
@@ -135,7 +145,13 @@ class LearnyDatabase:
                 (account_id, "created", now),
             )
 
-        return {"id": account_id, "username": username, "createdAt": now, "lastSeenAt": now}
+        return {
+            "id": account_id,
+            "username": username,
+            "profilePicture": None,
+            "createdAt": now,
+            "lastSeenAt": now,
+        }
 
     def authenticate(self, username: str, password: str) -> dict[str, Any]:
         username = _clean_username(username)
@@ -164,6 +180,29 @@ class LearnyDatabase:
         return {
             "id": int(row["id"]),
             "username": str(row["username"]),
+            "profilePicture": row["profile_picture"],
+            "createdAt": int(row["created_at"]),
+            "lastSeenAt": now,
+        }
+
+    def update_profile_picture(self, account_id: int, profile_picture: str | None) -> dict[str, Any]:
+        now = _now_ms()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE accounts SET profile_picture = ?, last_seen_at = ? WHERE id = ?",
+                (profile_picture, now, account_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM accounts WHERE id = ?",
+                (account_id,),
+            ).fetchone()
+
+        if row is None:
+            raise AccountError("Account could not be updated.")
+        return {
+            "id": int(row["id"]),
+            "username": str(row["username"]),
+            "profilePicture": row["profile_picture"],
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -227,6 +266,7 @@ class LearnyDatabase:
         return {
             "id": int(row["id"]),
             "username": str(row["username"]),
+            "profilePicture": row["profile_picture"],
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }

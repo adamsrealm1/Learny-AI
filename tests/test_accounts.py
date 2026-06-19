@@ -44,6 +44,32 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(account["stats"]["chats"], 0)
         self.assertEqual(account["stats"]["messages"], 0)
 
+    def test_profile_picture_can_be_added_and_removed(self) -> None:
+        profile_picture = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        )
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "picture_user", "password": "strong-password"},
+            )
+            added = server.post_json(
+                "/api/account/profile-picture",
+                {"profilePicture": profile_picture},
+            )
+            account_with_picture = server.get_json("/api/account")
+            removed = server.post_json(
+                "/api/account/profile-picture",
+                {"profilePicture": None},
+            )
+            account_without_picture = server.get_json("/api/account")
+
+        self.assertEqual(added["account"]["profilePicture"], profile_picture)
+        self.assertEqual(account_with_picture["account"]["profilePicture"], profile_picture)
+        self.assertIsNone(removed["account"]["profilePicture"])
+        self.assertIsNone(account_without_picture["account"]["profilePicture"])
+
     def test_signed_in_chat_sync_round_trips_from_database(self) -> None:
         with run_account_server() as server:
             server.post_json(

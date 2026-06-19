@@ -18,6 +18,7 @@ const messageSearchCount = document.querySelector("#messageSearchCount");
 const welcomeHeading = document.querySelector("#welcomeHeading");
 const accountButton = document.querySelector("#accountButton");
 const accountStatusText = document.querySelector("#accountStatusText");
+const accountOrbImage = document.querySelector("#accountOrbImage");
 const accountModal = document.querySelector("#accountModal");
 const accountModalBackdrop = document.querySelector("#accountModalBackdrop");
 const accountModalClose = document.querySelector("#accountModalClose");
@@ -28,11 +29,14 @@ const signInForm = document.querySelector("#signInForm");
 const createAccountForm = document.querySelector("#createAccountForm");
 const signInMessage = document.querySelector("#signInMessage");
 const createAccountMessage = document.querySelector("#createAccountMessage");
+const accountAvatarImage = document.querySelector("#accountAvatarImage");
 const accountModalUsername = document.querySelector("#accountModalUsername");
 const accountModalCreated = document.querySelector("#accountModalCreated");
 const accountChatCount = document.querySelector("#accountChatCount");
 const accountMessageCount = document.querySelector("#accountMessageCount");
 const accountSessionCount = document.querySelector("#accountSessionCount");
+const accountProfilePictureInput = document.querySelector("#accountProfilePictureInput");
+const accountProfilePictureButton = document.querySelector("#accountProfilePictureButton");
 const accountSignOutButton = document.querySelector("#accountSignOutButton");
 const accountDeleteButton = document.querySelector("#accountDeleteButton");
 const accountDeleteConfirm = document.querySelector("#accountDeleteConfirm");
@@ -45,6 +49,9 @@ const SESSION_KEY = "learny-session-id";
 const COPY_ICON_PATH = "./icon_library/copy.png";
 const CHECK_ICON_PATH = "./icon_library/check.png";
 const X_ICON_PATH = "./icon_library/X.png";
+const PROFILE_ICON_PATH = "./icon_library/profile.png";
+const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
+const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const COPY_RESET_DELAY_MS = 1400;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
@@ -543,7 +550,32 @@ function saveChats() {
   }
 }
 
+function accountProfilePicture() {
+  if (!currentAccount || typeof currentAccount.profilePicture !== "string") {
+    return "";
+  }
+  return currentAccount.profilePicture.trim();
+}
+
+function renderAccountProfilePicture() {
+  const customPicture = accountProfilePicture();
+  const imageSource = customPicture || PROFILE_ICON_PATH;
+  [accountOrbImage, accountAvatarImage].forEach((image) => {
+    if (image) {
+      image.src = imageSource;
+    }
+  });
+
+  if (accountProfilePictureButton) {
+    accountProfilePictureButton.textContent = customPicture
+      ? "Remove profile picture"
+      : "Add profile picture";
+  }
+}
+
 function updateAccountButton() {
+  renderAccountProfilePicture();
+
   if (!accountButton || !accountStatusText) {
     return;
   }
@@ -604,6 +636,8 @@ function resetDeleteConfirmation() {
 }
 
 function renderAccountModalDetails() {
+  renderAccountProfilePicture();
+
   if (!currentAccount) {
     return;
   }
@@ -632,7 +666,7 @@ function setAccountModalCopy(view) {
 
   if (view === "create-account") {
     accountModalTitle.textContent = "Create account";
-    accountModalSubtitle.textContent = "Start syncing Learny chats with the local SQLite database.";
+    accountModalSubtitle.textContent = "Start syncing Learny chats with the account database.";
     return;
   }
   if (view === "myaccount" && currentAccount) {
@@ -701,7 +735,7 @@ function openAccountModal(view = currentAccount ? "myaccount" : "sign-in") {
   document.body.classList.add("account-modal-open");
   showAccountView(view);
   window.setTimeout(() => {
-    const firstInput = accountModal.querySelector("[data-account-view]:not([hidden]) input");
+    const firstInput = accountModal.querySelector("[data-account-view]:not([hidden]) input:not([hidden])");
     const closeButton = accountModalClose;
     if (firstInput instanceof HTMLElement) {
       firstInput.focus();
@@ -1547,6 +1581,98 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint) {
   }
 }
 
+function setProfilePictureButtonBusy(busy) {
+  if (!accountProfilePictureButton) {
+    return;
+  }
+  accountProfilePictureButton.disabled = busy;
+  if (busy) {
+    accountProfilePictureButton.textContent = "Working...";
+  } else {
+    renderAccountProfilePicture();
+  }
+}
+
+function readProfilePictureFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file || !PROFILE_PICTURE_TYPES.has(file.type) || file.size > PROFILE_PICTURE_MAX_BYTES) {
+      reject(new Error(GENERIC_ERROR_MESSAGE));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      if (!result.startsWith("data:image/")) {
+        reject(new Error(GENERIC_ERROR_MESSAGE));
+        return;
+      }
+      resolve(result);
+    });
+    reader.addEventListener("error", () => reject(new Error(GENERIC_ERROR_MESSAGE)));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function saveAccountProfilePicture(profilePicture) {
+  const data = await apiFetch(
+    "/api/account/profile-picture",
+    {
+      method: "POST",
+      body: JSON.stringify({ profilePicture }),
+      timeoutMs: STATUS_FETCH_TIMEOUT_MS,
+    },
+    activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+  );
+  if (!data.authenticated || !data.account) {
+    throw new Error(GENERIC_ERROR_MESSAGE);
+  }
+
+  currentAccount = data.account;
+  currentAccountStats = data.stats || currentAccountStats;
+  updateAccountButton();
+  renderAccountModalDetails();
+}
+
+async function handleAccountProfilePictureButton() {
+  if (!currentAccount || !accountProfilePictureInput) {
+    return;
+  }
+
+  if (!accountProfilePicture()) {
+    accountProfilePictureInput.click();
+    return;
+  }
+
+  setProfilePictureButtonBusy(true);
+  try {
+    await saveAccountProfilePicture(null);
+    accountProfilePictureInput.value = "";
+  } catch (error) {
+    setConnection("offline", "Servers offline");
+  } finally {
+    setProfilePictureButtonBusy(false);
+  }
+}
+
+async function handleAccountProfilePictureInputChange(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) {
+    return;
+  }
+
+  setProfilePictureButtonBusy(true);
+  try {
+    const profilePicture = await readProfilePictureFile(file);
+    await saveAccountProfilePicture(profilePicture);
+  } catch (error) {
+    setConnection("offline", "Servers offline");
+  } finally {
+    event.target.value = "";
+    setProfilePictureButtonBusy(false);
+  }
+}
+
 async function handleAccountSignOut() {
   if (!accountSignOutButton) {
     return;
@@ -1655,6 +1781,14 @@ if (createAccountForm) {
     event.preventDefault();
     handleAccountAuthSubmit(createAccountForm, createAccountMessage, "/api/accounts/create");
   });
+}
+
+if (accountProfilePictureButton) {
+  accountProfilePictureButton.addEventListener("click", handleAccountProfilePictureButton);
+}
+
+if (accountProfilePictureInput) {
+  accountProfilePictureInput.addEventListener("change", handleAccountProfilePictureInputChange);
 }
 
 if (accountSignOutButton) {
