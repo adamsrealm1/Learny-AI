@@ -613,7 +613,8 @@ function rateLimitWindowSeconds(rateLimit = currentRateLimit || DEFAULT_RATE_LIM
 }
 
 function rateLimitSecondsLeft(rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT) {
-  return Math.max(0, Math.ceil((rateLimit.resetAt - Date.now()) / 1000));
+  const secondsLeft = Math.max(0, Math.ceil((rateLimit.resetAt - Date.now()) / 1000));
+  return Math.min(secondsLeft, rateLimitWindowSeconds(rateLimit));
 }
 
 function pluralize(value, singular, plural = `${singular}s`) {
