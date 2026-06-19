@@ -28,7 +28,6 @@ const signInForm = document.querySelector("#signInForm");
 const createAccountForm = document.querySelector("#createAccountForm");
 const signInMessage = document.querySelector("#signInMessage");
 const createAccountMessage = document.querySelector("#createAccountMessage");
-const accountAvatarLarge = document.querySelector("#accountAvatarLarge");
 const accountModalUsername = document.querySelector("#accountModalUsername");
 const accountModalCreated = document.querySelector("#accountModalCreated");
 const accountChatCount = document.querySelector("#accountChatCount");
@@ -559,10 +558,6 @@ function updateAccountButton() {
   accountStatusText.textContent = "Sign in to sync";
 }
 
-function accountInitial(username) {
-  return String(username || "L").trim().slice(0, 1).toUpperCase() || "L";
-}
-
 function formatAccountDate(timestamp) {
   const date = new Date(Number(timestamp));
   if (Number.isNaN(date.getTime())) {
@@ -613,9 +608,6 @@ function renderAccountModalDetails() {
     return;
   }
 
-  if (accountAvatarLarge) {
-    accountAvatarLarge.textContent = accountInitial(currentAccount.username);
-  }
   if (accountModalUsername) {
     accountModalUsername.textContent = currentAccount.username;
   }
