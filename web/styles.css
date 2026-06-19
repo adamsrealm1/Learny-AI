@@ -1077,8 +1077,8 @@ body.account-modal-open {
 }
 
 .rate-limit-panel.limited {
-  border-color: rgba(255, 107, 107, 0.24);
-  background: #171416;
+  border-color: rgba(255, 88, 88, 0.42);
+  background: #241013;
 }
 
 .rate-limit-copy {
@@ -1132,6 +1132,10 @@ body.account-modal-open {
 
 .rate-limit-panel.limited .rate-limit-track span {
   background: linear-gradient(90deg, #ff6b6b, #ffb36b);
+}
+
+.rate-limit-panel.limited .rate-limit-track {
+  background: rgba(255, 118, 118, 0.22);
 }
 
 .chat-item {

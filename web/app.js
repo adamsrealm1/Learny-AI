@@ -752,8 +752,8 @@ function renderRateLimitPopup() {
   }
 }
 
-function openRateLimitPopup() {
-  if (!rateLimitModal || !isRateLimited()) {
+function openRateLimitPopup({ force = false } = {}) {
+  if (!rateLimitModal || (!force && !isRateLimited())) {
     return;
   }
 
@@ -1772,6 +1772,9 @@ async function askLearny(message) {
           localStorage.setItem(RATE_LIMIT_SESSION_KEY, rateLimitSessionId);
         }
         updateRateLimit(data.rateLimit);
+        if (isRateLimited()) {
+          openRateLimitPopup({ force: true });
+        }
         saveChats();
         typing.remove();
         const thoughtSeconds = (performance.now() - thoughtStartedAt) / 1000;
@@ -1791,7 +1794,7 @@ async function askLearny(message) {
             localStorage.setItem(RATE_LIMIT_SESSION_KEY, rateLimitSessionId);
           }
           updateRateLimit(error.data.rateLimit);
-          openRateLimitPopup();
+          openRateLimitPopup({ force: true });
           completed = true;
           continue;
         }
