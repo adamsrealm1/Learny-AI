@@ -156,14 +156,14 @@ class AccountWebTests(unittest.TestCase):
             ["You", "Learny", "You", "Learny"],
         )
 
-    def test_rate_limit_blocks_26th_signed_in_ask_without_persisting(self) -> None:
+    def test_rate_limit_blocks_201st_signed_in_ask_without_persisting(self) -> None:
         CountingAnswerGenerator.calls = 0
         with run_account_server(CountingAnswerGenerator) as server:
             server.post_json(
                 "/api/accounts/create",
                 {"username": "limited_user", "password": "strong-password"},
             )
-            for index in range(25):
+            for index in range(200):
                 response = server.post_json(
                     "/api/ask",
                     {
@@ -172,7 +172,7 @@ class AccountWebTests(unittest.TestCase):
                         "sessionId": "limited-session",
                     },
                 )
-                self.assertEqual(response["rateLimit"]["limit"], 25)
+                self.assertEqual(response["rateLimit"]["limit"], 200)
 
             blocked = server.post_json_status(
                 "/api/ask",
@@ -187,22 +187,21 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(blocked["status"], 429)
         self.assertTrue(blocked["data"]["rateLimit"]["limited"])
         self.assertGreaterEqual(int(blocked["headers"].get("Retry-After", "0")), 1)
-        self.assertEqual(CountingAnswerGenerator.calls, 25)
-        self.assertEqual(len(chats["chats"][0]["messages"]), 50)
+        self.assertEqual(CountingAnswerGenerator.calls, 200)
+        self.assertEqual(len(chats["chats"][0]["messages"]), 400)
 
-    def test_rate_limit_status_does_not_consume_guest_quota(self) -> None:
+    def test_signed_out_global_rate_limit_blocks_31st_guest_ask(self) -> None:
         CountingAnswerGenerator.calls = 0
         with run_account_server(CountingAnswerGenerator) as server:
             status = server.get_json("/api/rate-limit")
-            rate_session_id = status["rateSessionId"]
-            headers = {"X-Learny-Rate-Session": rate_session_id}
-            for index in range(25):
+            headers = {"X-Learny-Rate-Session": "first-browser-session"}
+            for index in range(30):
                 response = server.post_json(
                     "/api/ask",
                     {"message": f"guest hello {index}", "sessionId": "guest-chat-session"},
                     headers,
                 )
-                self.assertEqual(response["rateLimit"]["limit"], 25)
+                self.assertEqual(response["rateLimit"]["limit"], 30)
 
             blocked = server.post_json_status(
                 "/api/ask",
@@ -210,10 +209,10 @@ class AccountWebTests(unittest.TestCase):
                 headers,
             )
 
-        self.assertEqual(status["rateLimit"]["remaining"], 25)
+        self.assertEqual(status["rateLimit"]["remaining"], 30)
         self.assertEqual(blocked["status"], 429)
         self.assertTrue(blocked["data"]["rateLimit"]["limited"])
-        self.assertEqual(CountingAnswerGenerator.calls, 25)
+        self.assertEqual(CountingAnswerGenerator.calls, 30)
 
     def test_signed_in_rate_limit_survives_new_login_session(self) -> None:
         with run_account_server() as server:
@@ -221,7 +220,7 @@ class AccountWebTests(unittest.TestCase):
                 "/api/accounts/create",
                 {"username": "persistent_limit", "password": "strong-password"},
             )
-            for index in range(25):
+            for index in range(200):
                 server.post_json(
                     "/api/ask",
                     {"message": f"hello {index}", "chatId": "persistent-chat"},
@@ -240,6 +239,37 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(blocked["status"], 429)
         self.assertTrue(blocked["data"]["rateLimit"]["limited"])
 
+    def test_signed_out_global_rate_limit_cannot_be_bypassed_by_rate_session(self) -> None:
+        with run_account_server() as server:
+            for index in range(30):
+                server.post_json(
+                    "/api/ask",
+                    {"message": f"global guest {index}", "sessionId": "global-guest-session"},
+                    {"X-Learny-Rate-Session": f"browser-{index}"},
+                )
+
+            blocked = server.post_json_status(
+                "/api/ask",
+                {"message": "try a fresh browser bypass", "sessionId": "global-guest-session"},
+                {"X-Learny-Rate-Session": "fresh-browser-after-limit"},
+            )
+            status = server.get_json("/api/rate-limit")
+
+        self.assertEqual(blocked["status"], 429)
+        self.assertTrue(blocked["data"]["rateLimit"]["limited"])
+        self.assertTrue(status["rateLimit"]["limited"])
+
+    def test_signed_in_global_limit_uses_200_message_bucket(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "signed_in_limit", "password": "strong-password"},
+            )
+            status = server.get_json("/api/rate-limit")
+
+        self.assertEqual(status["rateLimit"]["limit"], 200)
+        self.assertEqual(status["rateLimit"]["remaining"], 200)
+
     def test_failed_answer_does_not_consume_rate_limit_or_save_chat_messages(self) -> None:
         with run_account_server(NoAnswerGenerator) as server:
             server.post_json(
@@ -255,7 +285,7 @@ class AccountWebTests(unittest.TestCase):
 
         self.assertEqual(failed["source"], "unknown")
         self.assertTrue(failed["retryable"])
-        self.assertEqual(rate_limit["rateLimit"]["remaining"], 25)
+        self.assertEqual(rate_limit["rateLimit"]["remaining"], 200)
         self.assertEqual(chats["chats"], [])
 
     def test_delete_account_removes_session_and_saved_chats(self) -> None:

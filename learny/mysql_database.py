@@ -342,21 +342,53 @@ class MySQLLearnyDatabase:
 
         return {"chats": chat_count, "messages": message_count, "sessions": session_count}
 
-    def peek_rate_limit(self, identity_key: str) -> dict[str, Any]:
+    def peek_rate_limit(
+        self,
+        identity_key: str,
+        *,
+        limit: int = RATE_LIMIT_LIMIT,
+        window_ms: int = RATE_LIMIT_WINDOW_MS,
+    ) -> dict[str, Any]:
         clean_identity_key = _clean_rate_limit_identity(identity_key)
         with self._lock, self._connect() as connection:
             with connection.cursor() as cursor:
-                return self._rate_limit_snapshot(cursor, clean_identity_key, consume=False)
+                return self._rate_limit_snapshot(
+                    cursor,
+                    clean_identity_key,
+                    consume=False,
+                    limit=limit,
+                    window_ms=window_ms,
+                )
 
-    def consume_rate_limit(self, identity_key: str) -> dict[str, Any]:
+    def consume_rate_limit(
+        self,
+        identity_key: str,
+        *,
+        limit: int = RATE_LIMIT_LIMIT,
+        window_ms: int = RATE_LIMIT_WINDOW_MS,
+    ) -> dict[str, Any]:
         clean_identity_key = _clean_rate_limit_identity(identity_key)
         with self._lock, self._connect() as connection:
             with connection.cursor() as cursor:
-                return self._rate_limit_snapshot(cursor, clean_identity_key, consume=True)
+                return self._rate_limit_snapshot(
+                    cursor,
+                    clean_identity_key,
+                    consume=True,
+                    limit=limit,
+                    window_ms=window_ms,
+                )
 
-    def _rate_limit_snapshot(self, cursor: Any, identity_key: str, *, consume: bool) -> dict[str, Any]:
+    def _rate_limit_snapshot(
+        self,
+        cursor: Any,
+        identity_key: str,
+        *,
+        consume: bool,
+        limit: int,
+        window_ms: int,
+    ) -> dict[str, Any]:
         now = _now_ms()
-        window_start = now - RATE_LIMIT_WINDOW_MS
+        window_start = now - window_ms
         cursor.execute("DELETE FROM rate_limit_events WHERE created_at <= %s", (window_start,))
         cursor.execute(
             """
@@ -369,8 +401,14 @@ class MySQLLearnyDatabase:
         )
         active_timestamps = [int(row["created_at"]) for row in cursor.fetchall()]
 
-        if len(active_timestamps) >= RATE_LIMIT_LIMIT:
-            return _rate_limit_payload(active_timestamps=active_timestamps, now=now, allowed=False)
+        if len(active_timestamps) >= limit:
+            return _rate_limit_payload(
+                active_timestamps=active_timestamps,
+                now=now,
+                allowed=False,
+                limit=limit,
+                window_ms=window_ms,
+            )
 
         if consume:
             cursor.execute(
@@ -379,7 +417,13 @@ class MySQLLearnyDatabase:
             )
             active_timestamps.append(now)
 
-        return _rate_limit_payload(active_timestamps=active_timestamps, now=now, allowed=True)
+        return _rate_limit_payload(
+            active_timestamps=active_timestamps,
+            now=now,
+            allowed=True,
+            limit=limit,
+            window_ms=window_ms,
+        )
 
     def list_chats(self, account_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:

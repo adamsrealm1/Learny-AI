@@ -26,7 +26,7 @@ from .groq_client import (
     THIRD_FALLBACK_GROQ_MODEL,
     GroqAnswerGenerator,
 )
-from .database import AccountError, AuthenticationError
+from .database import AccountError, AuthenticationError, RATE_LIMIT_LIMIT, RATE_LIMIT_WINDOW_MS
 from .messages import GENERIC_ERROR_MESSAGE
 from .storage import create_learny_database
 
@@ -54,6 +54,9 @@ PROFILE_PICTURE_PREFIXES = (
     "data:image/webp;base64,",
     "data:image/gif;base64,",
 )
+GUEST_RATE_LIMIT_LIMIT = 30
+GLOBAL_SIGNED_IN_RATE_LIMIT_IDENTITY = "global:signed-in-ask"
+GLOBAL_GUEST_RATE_LIMIT_IDENTITY = "global:guest-ask"
 
 
 @dataclass(frozen=True)
@@ -265,7 +268,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
         def _handle_rate_limit(self) -> None:
             account = self._current_account()
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            rate_limit = database.peek_rate_limit(_rate_limit_identity(account, rate_session_id))
+            rate_limit_identity, rate_limit_size = _rate_limit_policy(account)
+            rate_limit = database.peek_rate_limit(
+                rate_limit_identity,
+                limit=rate_limit_size,
+                window_ms=RATE_LIMIT_WINDOW_MS,
+            )
             self._send_json(
                 {
                     "rateSessionId": rate_session_id,
@@ -315,8 +323,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             )
             session_id, session_history = session_store.get(requested_session_id)
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            rate_limit_identity = _rate_limit_identity(account, rate_session_id)
-            rate_limit = database.peek_rate_limit(rate_limit_identity)
+            rate_limit_identity, rate_limit_size = _rate_limit_policy(account)
+            rate_limit = database.peek_rate_limit(
+                rate_limit_identity,
+                limit=rate_limit_size,
+                window_ms=RATE_LIMIT_WINDOW_MS,
+            )
             if not rate_limit.get("allowed", False):
                 self._send_json(
                     {
@@ -356,7 +368,11 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
-            rate_limit = database.consume_rate_limit(rate_limit_identity)
+            rate_limit = database.consume_rate_limit(
+                rate_limit_identity,
+                limit=rate_limit_size,
+                window_ms=RATE_LIMIT_WINDOW_MS,
+            )
             if not rate_limit.get("allowed", False):
                 self._send_json(
                     {
@@ -660,10 +676,10 @@ def _rate_session_id(value: str | None) -> str:
     return _clean_session_id(value) or secrets.token_urlsafe(18)
 
 
-def _rate_limit_identity(account: dict[str, Any] | None, rate_session_id: str) -> str:
-    if account is not None:
-        return f"account:{int(account['id'])}"
-    return f"session:{rate_session_id}"
+def _rate_limit_policy(account: dict[str, Any] | None) -> tuple[str, int]:
+    if account is None:
+        return GLOBAL_GUEST_RATE_LIMIT_IDENTITY, GUEST_RATE_LIMIT_LIMIT
+    return GLOBAL_SIGNED_IN_RATE_LIMIT_IDENTITY, RATE_LIMIT_LIMIT
 
 
 def _public_rate_limit(rate_limit: dict[str, Any]) -> dict[str, Any]:

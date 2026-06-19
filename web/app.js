@@ -16,7 +16,9 @@ const rateLimitBackdrop = document.querySelector("#rateLimitBackdrop");
 const rateLimitClose = document.querySelector("#rateLimitClose");
 const rateLimitOk = document.querySelector("#rateLimitOk");
 const rateLimitPopupSeconds = document.querySelector("#rateLimitPopupSeconds");
+const rateLimitPopupUnit = document.querySelector("#rateLimitPopupUnit");
 const rateLimitPopupFill = document.querySelector("#rateLimitPopupFill");
+const rateLimitDescription = document.querySelector("#rateLimitDescription");
 const emptyState = document.querySelector("#emptyState");
 const starField = document.querySelector("#starField");
 const appShell = document.querySelector(".app-shell");
@@ -78,9 +80,9 @@ const ASK_RETRY_BASE_DELAY_MS = 1200;
 const ASK_RETRY_MAX_DELAY_MS = 3500;
 const ASK_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_RATE_LIMIT = {
-  limit: 25,
-  remaining: 25,
-  windowMs: 60000,
+  limit: 30,
+  remaining: 30,
+  windowMs: 86400000,
   resetAt: 0,
   limited: false,
 };
@@ -614,6 +616,41 @@ function rateLimitSecondsLeft(rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT
   return Math.max(0, Math.ceil((rateLimit.resetAt - Date.now()) / 1000));
 }
 
+function pluralize(value, singular, plural = `${singular}s`) {
+  return value === 1 ? singular : plural;
+}
+
+function rateLimitPercent(rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT) {
+  if (!rateLimit || rateLimit.limit <= 0 || rateLimit.remaining <= 0) {
+    return 0;
+  }
+  return Math.max(1, Math.min(100, Math.round((rateLimit.remaining / rateLimit.limit) * 100)));
+}
+
+function rateLimitResetParts(rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT) {
+  const secondsLeft = rateLimitSecondsLeft(rateLimit);
+  const hoursLeft = Math.floor(secondsLeft / 3600);
+  if (hoursLeft > 0) {
+    const displayHours = Math.ceil(secondsLeft / 3600);
+    return {
+      value: displayHours,
+      unit: pluralize(displayHours, "hour"),
+      label: `${displayHours} ${pluralize(displayHours, "hour")} until reset`,
+    };
+  }
+
+  const minutesLeft = Math.max(1, Math.ceil(secondsLeft / 60));
+  return {
+    value: minutesLeft,
+    unit: pluralize(minutesLeft, "minute"),
+    label: `${minutesLeft} ${pluralize(minutesLeft, "minute")} until reset`,
+  };
+}
+
+function rateLimitRemainingLabel(rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT) {
+  return `${rateLimit.remaining} ${pluralize(rateLimit.remaining, "message")} left`;
+}
+
 function syncComposerAvailability() {
   if (DIRECT_FILE_MODE) {
     sendButton.disabled = true;
@@ -632,28 +669,34 @@ function renderRateLimit() {
   const rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT;
   const limited = isRateLimited();
   const fillRatio = rateLimit.limit > 0 ? rateLimit.remaining / rateLimit.limit : 1;
-  const windowSeconds = rateLimitWindowSeconds(rateLimit);
-  const displaySeconds = limited ? rateLimitSecondsLeft(rateLimit) : windowSeconds;
+  const percent = rateLimitPercent(rateLimit);
+  const resetParts = rateLimitResetParts(rateLimit);
+  const remainingLabel = rateLimitRemainingLabel(rateLimit);
 
   if (rateLimitPanel) {
     rateLimitPanel.classList.toggle("limited", limited);
+    rateLimitPanel.setAttribute("title", remainingLabel);
+    rateLimitPanel.setAttribute(
+      "aria-label",
+      `Message rate limit: ${percent} percent, ${remainingLabel}, ${resetParts.label}`,
+    );
   }
   if (rateLimitRemaining) {
-    rateLimitRemaining.textContent =
-      `${rateLimit.remaining}/${rateLimit.limit} messages left`;
+    rateLimitRemaining.textContent = `${percent}%`;
   }
   if (rateLimitFill) {
     rateLimitFill.style.setProperty("--rate-fill", String(Math.max(0, Math.min(1, fillRatio))));
   }
   if (rateLimitWindow) {
-    rateLimitWindow.textContent = `${displaySeconds} seconds`;
+    rateLimitWindow.textContent = resetParts.label;
   }
 
   if (rateLimitRefreshTimerId !== null) {
     window.clearTimeout(rateLimitRefreshTimerId);
     rateLimitRefreshTimerId = null;
   }
-  if (limited) {
+  if (Date.now() < rateLimit.resetAt) {
+    const nextTickMs = limited || rateLimitSecondsLeft(rateLimit) < 3600 ? 1000 : 60000;
     rateLimitRefreshTimerId = window.setTimeout(() => {
       rateLimitRefreshTimerId = null;
       if (Date.now() >= rateLimit.resetAt) {
@@ -661,7 +704,7 @@ function renderRateLimit() {
         return;
       }
       renderRateLimit();
-    }, 1000);
+    }, nextTickMs);
   }
 
   syncComposerAvailability();
@@ -672,12 +715,20 @@ function renderRateLimitPopup() {
     return;
   }
 
-  const secondsLeft = rateLimitSecondsLeft();
   const windowSeconds = rateLimitWindowSeconds();
+  const secondsLeft = rateLimitSecondsLeft();
   const elapsed = Math.max(0, windowSeconds - secondsLeft);
   const progress = windowSeconds > 0 ? elapsed / windowSeconds : 1;
+  const resetParts = rateLimitResetParts();
+  if (rateLimitDescription) {
+    rateLimitDescription.textContent =
+      `Learny allows ${currentRateLimit.limit} ${pluralize(currentRateLimit.limit, "message")} per day. Your next message unlocks when the reset timer finishes.`;
+  }
   if (rateLimitPopupSeconds) {
-    rateLimitPopupSeconds.textContent = String(secondsLeft);
+    rateLimitPopupSeconds.textContent = String(resetParts.value);
+  }
+  if (rateLimitPopupUnit) {
+    rateLimitPopupUnit.textContent = `${resetParts.unit} left`;
   }
   if (rateLimitPopupFill) {
     rateLimitPopupFill.style.setProperty("--rate-popup-fill", String(Math.max(0, Math.min(1, progress))));

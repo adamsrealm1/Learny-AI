@@ -16,8 +16,8 @@ from .conversation import ConversationHistory
 
 PASSWORD_ITERATIONS = 210_000
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
-RATE_LIMIT_LIMIT = 25
-RATE_LIMIT_WINDOW_MS = 60_000
+RATE_LIMIT_LIMIT = 200
+RATE_LIMIT_WINDOW_MS = 86_400_000
 
 
 class AccountError(ValueError):
@@ -306,15 +306,39 @@ class LearnyDatabase:
             "sessions": int(session_count),
         }
 
-    def peek_rate_limit(self, identity_key: str) -> dict[str, Any]:
+    def peek_rate_limit(
+        self,
+        identity_key: str,
+        *,
+        limit: int = RATE_LIMIT_LIMIT,
+        window_ms: int = RATE_LIMIT_WINDOW_MS,
+    ) -> dict[str, Any]:
         clean_identity_key = _clean_rate_limit_identity(identity_key)
         with self._lock, self._connect() as connection:
-            return _sqlite_rate_limit_snapshot(connection, clean_identity_key, consume=False)
+            return _sqlite_rate_limit_snapshot(
+                connection,
+                clean_identity_key,
+                consume=False,
+                limit=limit,
+                window_ms=window_ms,
+            )
 
-    def consume_rate_limit(self, identity_key: str) -> dict[str, Any]:
+    def consume_rate_limit(
+        self,
+        identity_key: str,
+        *,
+        limit: int = RATE_LIMIT_LIMIT,
+        window_ms: int = RATE_LIMIT_WINDOW_MS,
+    ) -> dict[str, Any]:
         clean_identity_key = _clean_rate_limit_identity(identity_key)
         with self._lock, self._connect() as connection:
-            return _sqlite_rate_limit_snapshot(connection, clean_identity_key, consume=True)
+            return _sqlite_rate_limit_snapshot(
+                connection,
+                clean_identity_key,
+                consume=True,
+                limit=limit,
+                window_ms=window_ms,
+            )
 
     def list_chats(self, account_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
@@ -636,19 +660,21 @@ def _rate_limit_payload(
     active_timestamps: list[int],
     now: int,
     allowed: bool,
+    limit: int,
+    window_ms: int,
 ) -> dict[str, Any]:
     active_timestamps.sort()
     active_count = len(active_timestamps)
-    remaining = max(0, RATE_LIMIT_LIMIT - active_count)
+    remaining = max(0, limit - active_count)
     reset_at = (
-        active_timestamps[0] + RATE_LIMIT_WINDOW_MS
+        active_timestamps[0] + window_ms
         if active_timestamps
-        else now + RATE_LIMIT_WINDOW_MS
+        else now + window_ms
     )
     return {
-        "limit": RATE_LIMIT_LIMIT,
+        "limit": limit,
         "remaining": remaining,
-        "windowMs": RATE_LIMIT_WINDOW_MS,
+        "windowMs": window_ms,
         "resetAt": reset_at,
         "limited": remaining <= 0,
         "allowed": allowed,
@@ -660,9 +686,11 @@ def _sqlite_rate_limit_snapshot(
     identity_key: str,
     *,
     consume: bool,
+    limit: int,
+    window_ms: int,
 ) -> dict[str, Any]:
     now = _now_ms()
-    window_start = now - RATE_LIMIT_WINDOW_MS
+    window_start = now - window_ms
     connection.execute("DELETE FROM rate_limit_events WHERE created_at <= ?", (window_start,))
     rows = connection.execute(
         """
@@ -675,8 +703,14 @@ def _sqlite_rate_limit_snapshot(
     ).fetchall()
     active_timestamps = [int(row["created_at"]) for row in rows]
 
-    if len(active_timestamps) >= RATE_LIMIT_LIMIT:
-        return _rate_limit_payload(active_timestamps=active_timestamps, now=now, allowed=False)
+    if len(active_timestamps) >= limit:
+        return _rate_limit_payload(
+            active_timestamps=active_timestamps,
+            now=now,
+            allowed=False,
+            limit=limit,
+            window_ms=window_ms,
+        )
 
     if consume:
         connection.execute(
@@ -685,7 +719,13 @@ def _sqlite_rate_limit_snapshot(
         )
         active_timestamps.append(now)
 
-    return _rate_limit_payload(active_timestamps=active_timestamps, now=now, allowed=True)
+    return _rate_limit_payload(
+        active_timestamps=active_timestamps,
+        now=now,
+        allowed=True,
+        limit=limit,
+        window_ms=window_ms,
+    )
 
 
 def _message_from_row(row: sqlite3.Row) -> dict[str, Any]:
