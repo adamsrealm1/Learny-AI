@@ -687,6 +687,7 @@ body.account-modal-open {
 
 .account-primary-action,
 .account-secondary-action,
+.account-admin-action,
 .account-danger-action,
 .account-link-button {
   min-height: 42px;
@@ -715,10 +716,17 @@ body.account-modal-open {
 }
 
 .account-secondary-action,
+.account-admin-action,
 .account-link-button {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.055);
   color: #f3f3f3;
+}
+
+.account-admin-action {
+  border-color: rgba(255, 174, 92, 0.34);
+  background: rgba(255, 144, 64, 0.1);
+  color: #ffd7ad;
 }
 
 .account-link-button {
@@ -731,11 +739,20 @@ body.account-modal-open {
 
 .account-secondary-action:hover,
 .account-secondary-action:focus-visible,
+.account-admin-action:hover,
+.account-admin-action:focus-visible,
 .account-link-button:hover,
 .account-link-button:focus-visible {
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.1);
   transform: translateY(-2px);
+}
+
+.account-admin-action:hover,
+.account-admin-action:focus-visible {
+  border-color: rgba(255, 184, 98, 0.5);
+  background: rgba(255, 144, 64, 0.16);
+  color: #fff;
 }
 
 .account-danger-action {
@@ -839,6 +856,7 @@ body.account-modal-open {
 
 .account-primary-action:disabled,
 .account-secondary-action:disabled,
+.account-admin-action:disabled,
 .account-danger-action:disabled,
 .account-modal-form input:disabled {
   cursor: not-allowed;

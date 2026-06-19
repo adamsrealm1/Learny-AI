@@ -49,6 +49,8 @@ const accountMessageCount = document.querySelector("#accountMessageCount");
 const accountSessionCount = document.querySelector("#accountSessionCount");
 const accountProfilePictureInput = document.querySelector("#accountProfilePictureInput");
 const accountProfilePictureButton = document.querySelector("#accountProfilePictureButton");
+const accountRateLimitResetButton = document.querySelector("#accountRateLimitResetButton");
+const accountRateLimitResetMessage = document.querySelector("#accountRateLimitResetMessage");
 const accountSignOutButton = document.querySelector("#accountSignOutButton");
 const accountDeleteButton = document.querySelector("#accountDeleteButton");
 const accountDeleteConfirm = document.querySelector("#accountDeleteConfirm");
@@ -878,6 +880,10 @@ function renderAccountModalDetails() {
   renderAccountProfilePicture();
 
   if (!currentAccount) {
+    if (accountRateLimitResetButton) {
+      accountRateLimitResetButton.hidden = true;
+    }
+    setAccountFormMessage(accountRateLimitResetMessage);
     return;
   }
 
@@ -895,6 +901,12 @@ function renderAccountModalDetails() {
   }
   if (accountSessionCount) {
     accountSessionCount.textContent = String((currentAccountStats && currentAccountStats.sessions) || 0);
+  }
+  if (accountRateLimitResetButton) {
+    accountRateLimitResetButton.hidden = !currentAccount.canResetRateLimits;
+  }
+  if (!currentAccount.canResetRateLimits) {
+    setAccountFormMessage(accountRateLimitResetMessage);
   }
 }
 
@@ -1946,6 +1958,42 @@ async function handleAccountProfilePictureInputChange(event) {
   }
 }
 
+async function handleRateLimitReset() {
+  if (!accountRateLimitResetButton || !currentAccount || !currentAccount.canResetRateLimits) {
+    return;
+  }
+
+  accountRateLimitResetButton.disabled = true;
+  accountRateLimitResetButton.textContent = "Resetting...";
+  setAccountFormMessage(accountRateLimitResetMessage);
+  try {
+    const data = await apiFetch(
+      "/api/rate-limits/reset",
+      {
+        method: "POST",
+        body: JSON.stringify({}),
+        timeoutMs: STATUS_FETCH_TIMEOUT_MS,
+      },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    if (!data.ok || !data.rateLimit) {
+      throw new Error(GENERIC_ERROR_MESSAGE);
+    }
+    if (data.rateSessionId) {
+      rateLimitSessionId = data.rateSessionId;
+      localStorage.setItem(RATE_LIMIT_SESSION_KEY, rateLimitSessionId);
+    }
+    updateRateLimit(data.rateLimit);
+    closeRateLimitPopup();
+    setAccountFormMessage(accountRateLimitResetMessage, "All rate limits were reset.");
+  } catch (error) {
+    setAccountFormMessage(accountRateLimitResetMessage, GENERIC_ERROR_MESSAGE, true);
+  } finally {
+    accountRateLimitResetButton.disabled = false;
+    accountRateLimitResetButton.textContent = "Reset all rate limits";
+  }
+}
+
 async function handleAccountSignOut() {
   if (!accountSignOutButton) {
     return;
@@ -2081,6 +2129,10 @@ if (accountProfilePictureButton) {
 
 if (accountProfilePictureInput) {
   accountProfilePictureInput.addEventListener("change", handleAccountProfilePictureInputChange);
+}
+
+if (accountRateLimitResetButton) {
+  accountRateLimitResetButton.addEventListener("click", handleRateLimitReset);
 }
 
 if (accountSignOutButton) {

@@ -340,6 +340,11 @@ class LearnyDatabase:
                 window_ms=window_ms,
             )
 
+    def clear_rate_limits(self) -> int:
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute("DELETE FROM rate_limit_events")
+            return int(cursor.rowcount if cursor.rowcount is not None else 0)
+
     def list_chats(self, account_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
             chat_rows = connection.execute(

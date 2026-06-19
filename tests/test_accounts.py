@@ -61,7 +61,9 @@ class AccountWebTests(unittest.TestCase):
 
         self.assertTrue(data["authenticated"])
         self.assertEqual(data["account"]["username"], "adamsrealm1")
+        self.assertTrue(data["account"]["canResetRateLimits"])
         self.assertTrue(account["authenticated"])
+        self.assertTrue(account["account"]["canResetRateLimits"])
         self.assertEqual(account["stats"]["chats"], 0)
         self.assertEqual(account["stats"]["messages"], 0)
 
@@ -269,6 +271,38 @@ class AccountWebTests(unittest.TestCase):
 
         self.assertEqual(status["rateLimit"]["limit"], 200)
         self.assertEqual(status["rateLimit"]["remaining"], 200)
+
+    def test_adamsrealm1_can_reset_everyones_rate_limits(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            for index in range(3):
+                server.post_json(
+                    "/api/ask",
+                    {"message": f"admin reset setup {index}", "chatId": "admin-reset-chat"},
+                )
+            before_reset = server.get_json("/api/rate-limit")
+            reset = server.post_json("/api/rate-limits/reset", {})
+            after_reset = server.get_json("/api/rate-limit")
+
+        self.assertEqual(before_reset["rateLimit"]["remaining"], 197)
+        self.assertTrue(reset["ok"])
+        self.assertGreaterEqual(reset["deleted"], 3)
+        self.assertEqual(reset["rateLimit"]["remaining"], 200)
+        self.assertEqual(after_reset["rateLimit"]["remaining"], 200)
+
+    def test_non_admin_cannot_reset_rate_limits(self) -> None:
+        with run_account_server() as server:
+            account = server.post_json(
+                "/api/accounts/create",
+                {"username": "regular_user", "password": "strong-password"},
+            )
+            denied = server.post_json_status("/api/rate-limits/reset", {})
+
+        self.assertFalse(account["account"]["canResetRateLimits"])
+        self.assertEqual(denied["status"], 403)
 
     def test_failed_answer_does_not_consume_rate_limit_or_save_chat_messages(self) -> None:
         with run_account_server(NoAnswerGenerator) as server:

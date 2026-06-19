@@ -378,6 +378,12 @@ class MySQLLearnyDatabase:
                     window_ms=window_ms,
                 )
 
+    def clear_rate_limits(self) -> int:
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM rate_limit_events")
+                return int(cursor.rowcount)
+
     def _rate_limit_snapshot(
         self,
         cursor: Any,

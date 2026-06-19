@@ -54,6 +54,7 @@ PROFILE_PICTURE_PREFIXES = (
     "data:image/webp;base64,",
     "data:image/gif;base64,",
 )
+RATE_LIMIT_ADMIN_USERNAME = "adamsrealm1"
 GUEST_RATE_LIMIT_LIMIT = 30
 GLOBAL_SIGNED_IN_RATE_LIMIT_IDENTITY = "global:signed-in-ask"
 GLOBAL_GUEST_RATE_LIMIT_IDENTITY = "global:guest-ask"
@@ -128,6 +129,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 return
             if route == "/api/account/profile-picture":
                 self._handle_profile_picture()
+                return
+            if route == "/api/rate-limits/reset":
+                self._handle_reset_rate_limits()
                 return
             if route == "/api/chats/sync":
                 self._handle_sync_chats()
@@ -262,6 +266,32 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "authenticated": True,
                     "account": _public_account(updated_account),
                     "stats": database.account_stats(int(account["id"])),
+                }
+            )
+
+        def _handle_reset_rate_limits(self) -> None:
+            account = self._current_account()
+            if account is None:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+            if not _is_rate_limit_admin(account):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
+                return
+
+            deleted = database.clear_rate_limits()
+            rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
+            rate_limit_identity, rate_limit_size = _rate_limit_policy(account)
+            rate_limit = database.peek_rate_limit(
+                rate_limit_identity,
+                limit=rate_limit_size,
+                window_ms=RATE_LIMIT_WINDOW_MS,
+            )
+            self._send_json(
+                {
+                    "ok": True,
+                    "deleted": deleted,
+                    "rateSessionId": rate_session_id,
+                    "rateLimit": _public_rate_limit(rate_limit),
                 }
             )
 
@@ -669,6 +699,7 @@ def _public_account(account: dict[str, Any]) -> dict[str, Any]:
         "profilePicture": str(profile_picture) if profile_picture else None,
         "createdAt": int(account["createdAt"]),
         "lastSeenAt": int(account["lastSeenAt"]),
+        "canResetRateLimits": _is_rate_limit_admin(account),
     }
 
 
@@ -680,6 +711,10 @@ def _rate_limit_policy(account: dict[str, Any] | None) -> tuple[str, int]:
     if account is None:
         return GLOBAL_GUEST_RATE_LIMIT_IDENTITY, GUEST_RATE_LIMIT_LIMIT
     return GLOBAL_SIGNED_IN_RATE_LIMIT_IDENTITY, RATE_LIMIT_LIMIT
+
+
+def _is_rate_limit_admin(account: dict[str, Any] | None) -> bool:
+    return bool(account and str(account.get("username", "")).casefold() == RATE_LIMIT_ADMIN_USERNAME)
 
 
 def _public_rate_limit(rate_limit: dict[str, Any]) -> dict[str, Any]:

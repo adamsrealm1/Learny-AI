@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI</title>
-    <link rel="stylesheet" href="./web/styles.css?v=dailyrate3">
+    <link rel="stylesheet" href="./web/styles.css?v=adminreset1">
   </head>
   <body>
     <div class="app-shell">
@@ -208,6 +208,10 @@
             <button class="account-secondary-action" id="accountProfilePictureButton" type="button">
               Add profile picture
             </button>
+            <button class="account-admin-action" id="accountRateLimitResetButton" type="button" hidden>
+              Reset all rate limits
+            </button>
+            <p class="account-form-message" id="accountRateLimitResetMessage" aria-live="polite"></p>
             <button class="account-secondary-action" id="accountSignOutButton" type="button">Sign out</button>
             <button class="account-danger-action" id="accountDeleteButton" type="button">Delete account</button>
             <div class="account-danger-confirm" id="accountDeleteConfirm" hidden>
@@ -266,6 +270,6 @@
     </template>
 
     <script src="./web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./web/app.js?v=dailyrate3" defer></script>
+    <script src="./web/app.js?v=adminreset1" defer></script>
   </body>
 </html>
