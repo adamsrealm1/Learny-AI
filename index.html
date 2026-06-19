@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI</title>
-    <link rel="stylesheet" href="./web/styles.css?v=ratepaneldark1">
+    <link rel="stylesheet" href="./web/styles.css?v=accountshine1">
   </head>
   <body>
     <div class="app-shell">
@@ -53,12 +53,12 @@
         <section class="rate-limit-panel" id="rateLimitPanel" aria-label="Message rate limit">
           <div class="rate-limit-copy">
             <span>Messages</span>
-            <strong id="rateLimitRemaining">25 / 25 messages left</strong>
+            <strong id="rateLimitRemaining">25/25 messages left</strong>
           </div>
           <div class="rate-limit-track" aria-hidden="true">
             <span id="rateLimitFill"></span>
           </div>
-          <p id="rateLimitCountdown">Ready</p>
+          <p id="rateLimitWindow">60 seconds</p>
         </section>
 
       </aside>
@@ -198,7 +198,6 @@
           <section class="account-settings-panel" aria-label="Account settings">
             <div>
               <h3>Settings</h3>
-              <p>Manage this Learny account and its database-backed chat memory.</p>
             </div>
             <input
               id="accountProfilePictureInput"
@@ -212,7 +211,7 @@
             <button class="account-secondary-action" id="accountSignOutButton" type="button">Sign out</button>
             <button class="account-danger-action" id="accountDeleteButton" type="button">Delete account</button>
             <div class="account-danger-confirm" id="accountDeleteConfirm" hidden>
-              <p>This deletes the account, sessions, and saved chats from the database.</p>
+              <p>This will permanently delete all your data from Learny AI. Once deleted you may not restore your account.</p>
               <div>
                 <button class="account-secondary-action" id="accountDeleteCancel" type="button">Cancel</button>
                 <button class="account-danger-action solid" id="accountDeleteConfirmButton" type="button">Delete forever</button>
@@ -220,6 +219,39 @@
             </div>
           </section>
         </div>
+      </section>
+    </div>
+
+    <div class="rate-limit-modal" id="rateLimitModal" hidden>
+      <button class="rate-limit-backdrop" id="rateLimitBackdrop" type="button" aria-label="Close rate limit popup"></button>
+      <section
+        class="rate-limit-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rateLimitTitle"
+        aria-describedby="rateLimitDescription"
+      >
+        <button class="rate-limit-close" id="rateLimitClose" type="button" aria-label="Close rate limit popup">
+          <img class="ui-icon x-icon" src="./icon_library/X.png" alt="" aria-hidden="true">
+        </button>
+        <div class="rate-limit-orbit" aria-hidden="true">
+          <span></span>
+        </div>
+        <div class="rate-limit-dialog-copy">
+          <p class="rate-limit-kicker">Message limit</p>
+          <h2 id="rateLimitTitle">Rate limit reached</h2>
+          <p id="rateLimitDescription">
+            Learny allows 25 messages every 60 seconds. Your next message unlocks when the timer finishes.
+          </p>
+        </div>
+        <div class="rate-limit-countdown-card">
+          <span id="rateLimitPopupSeconds">60</span>
+          <small>seconds left</small>
+        </div>
+        <div class="rate-limit-dialog-meter" aria-hidden="true">
+          <span id="rateLimitPopupFill"></span>
+        </div>
+        <button class="rate-limit-ok" id="rateLimitOk" type="button">Got it</button>
       </section>
     </div>
 
@@ -234,6 +266,6 @@
     </template>
 
     <script src="./web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./web/app.js?v=ratelimit1" defer></script>
+    <script src="./web/app.js?v=ratelimitpopup1" defer></script>
   </body>
 </html>

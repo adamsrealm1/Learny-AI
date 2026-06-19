@@ -222,12 +222,12 @@ input:focus-visible {
 .account-button::before {
   content: "";
   position: absolute;
-  inset: -40% -20%;
+  inset: -40% -55%;
   background: linear-gradient(110deg, transparent 16%, rgba(255, 255, 255, 0.16), transparent 48%);
   opacity: 0;
-  transform: translateX(-34%);
+  transform: translateX(-72%);
   pointer-events: none;
-  transition: opacity 220ms ease, transform 420ms ease;
+  transition: opacity 220ms ease, transform 620ms ease;
 }
 
 .account-button:hover,
@@ -245,7 +245,7 @@ input:focus-visible {
 .account-button:hover::before,
 .account-button:focus-visible::before {
   opacity: 1;
-  transform: translateX(36%);
+  transform: translateX(72%);
 }
 
 .account-button.signed-in {
@@ -304,6 +304,10 @@ body.account-modal-open {
   overflow: hidden;
 }
 
+.rate-limit-open {
+  overflow: hidden;
+}
+
 .account-modal {
   position: fixed;
   inset: 0;
@@ -315,7 +319,8 @@ body.account-modal-open {
 
 .account-modal[hidden],
 .account-modal-view[hidden],
-.account-danger-confirm[hidden] {
+.account-danger-confirm[hidden],
+.rate-limit-modal[hidden] {
   display: none;
 }
 
@@ -372,6 +377,202 @@ body.account-modal-open {
   opacity: 0.58;
   pointer-events: none;
   animation: accountModalSheen 9s ease-in-out infinite alternate;
+}
+
+.rate-limit-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+}
+
+.rate-limit-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 50% 44%, rgba(255, 255, 255, 0.055), transparent 30%),
+    rgba(0, 0, 0, 0.78);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  animation: modalBackdropIn 220ms ease both;
+}
+
+.rate-limit-dialog {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 16px;
+  width: min(430px, 100%);
+  padding: 26px 22px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 50% 0, rgba(255, 255, 255, 0.09), transparent 44%),
+    linear-gradient(180deg, rgba(22, 22, 27, 0.96), rgba(7, 7, 10, 0.94));
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.12),
+    0 30px 110px rgba(0, 0, 0, 0.68);
+  overflow: hidden;
+  animation: modalPanelIn 340ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.rate-limit-dialog::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.16), transparent 32%, rgba(255, 255, 255, 0.055));
+  pointer-events: none;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  padding: 1px;
+}
+
+.rate-limit-dialog > * {
+  position: relative;
+  z-index: 1;
+}
+
+.rate-limit-close {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.075);
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.rate-limit-close:hover,
+.rate-limit-close:focus-visible {
+  background: rgba(255, 255, 255, 0.14);
+  transform: scale(1.04);
+}
+
+.rate-limit-orbit {
+  display: grid;
+  place-items: center;
+  width: 86px;
+  height: 86px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.12), transparent 54%),
+    rgba(255, 255, 255, 0.035);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.1),
+    0 18px 48px rgba(0, 0, 0, 0.34);
+}
+
+.rate-limit-orbit span {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.94) 0 12%, transparent 13%),
+    conic-gradient(from 0deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.92));
+  animation: rateLimitSpin 2.6s linear infinite;
+}
+
+.rate-limit-dialog-copy {
+  display: grid;
+  gap: 8px;
+  max-width: 330px;
+  text-align: center;
+}
+
+.rate-limit-kicker {
+  margin: 0;
+  color: rgba(217, 220, 255, 0.64);
+  font-size: 0.7rem;
+  font-weight: 780;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.rate-limit-dialog h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(1.6rem, 5vw, 2.2rem);
+  line-height: 1.05;
+}
+
+.rate-limit-dialog-copy p:last-child {
+  margin: 0;
+  color: rgba(232, 232, 240, 0.72);
+  line-height: 1.55;
+}
+
+.rate-limit-countdown-card {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 150px;
+  padding: 16px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.095);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+    rgba(0, 0, 0, 0.24);
+}
+
+.rate-limit-countdown-card span {
+  color: #fff;
+  font-size: 3.3rem;
+  font-weight: 820;
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.rate-limit-countdown-card small {
+  color: rgba(232, 232, 240, 0.58);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.rate-limit-dialog-meter {
+  width: min(290px, 100%);
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.rate-limit-dialog-meter span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.96));
+  transform-origin: left center;
+  transform: scaleX(var(--rate-popup-fill, 1));
+  transition: transform 280ms linear;
+}
+
+.rate-limit-ok {
+  min-width: 130px;
+  min-height: 42px;
+  padding: 0 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.11);
+  color: #fff;
+  font-weight: 760;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.12);
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.rate-limit-ok:hover,
+.rate-limit-ok:focus-visible {
+  background: rgba(255, 255, 255, 0.17);
+  transform: translateY(-1px);
 }
 
 .account-modal-panel > * {
@@ -905,6 +1106,7 @@ body.account-modal-open {
   color: #f7f7ff;
   font-size: 0.82rem;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .rate-limit-track {
@@ -1761,6 +1963,12 @@ body.account-modal-open {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes rateLimitSpin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

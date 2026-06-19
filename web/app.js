@@ -10,7 +10,13 @@ const chatSearchInput = document.querySelector("#chatSearchInput");
 const rateLimitPanel = document.querySelector("#rateLimitPanel");
 const rateLimitRemaining = document.querySelector("#rateLimitRemaining");
 const rateLimitFill = document.querySelector("#rateLimitFill");
-const rateLimitCountdown = document.querySelector("#rateLimitCountdown");
+const rateLimitWindow = document.querySelector("#rateLimitWindow");
+const rateLimitModal = document.querySelector("#rateLimitModal");
+const rateLimitBackdrop = document.querySelector("#rateLimitBackdrop");
+const rateLimitClose = document.querySelector("#rateLimitClose");
+const rateLimitOk = document.querySelector("#rateLimitOk");
+const rateLimitPopupSeconds = document.querySelector("#rateLimitPopupSeconds");
+const rateLimitPopupFill = document.querySelector("#rateLimitPopupFill");
 const emptyState = document.querySelector("#emptyState");
 const starField = document.querySelector("#starField");
 const appShell = document.querySelector(".app-shell");
@@ -70,9 +76,7 @@ const STATUS_CHECK_INTERVAL_MS = 15000;
 const STATUS_FETCH_TIMEOUT_MS = 8000;
 const ASK_RETRY_BASE_DELAY_MS = 1200;
 const ASK_RETRY_MAX_DELAY_MS = 3500;
-const ASK_REQUEST_TIMEOUT_MS = 60000;
-const ASK_RETRY_MAX_ATTEMPTS = 4;
-const ASK_RETRY_MAX_ELAPSED_MS = 65000;
+const ASK_REQUEST_TIMEOUT_MS = 10000;
 const DEFAULT_RATE_LIMIT = {
   limit: 25,
   remaining: 25,
@@ -111,7 +115,8 @@ let welcomeSequenceStarted = false;
 let currentAccount = null;
 let currentAccountStats = null;
 let currentRateLimit = { ...DEFAULT_RATE_LIMIT };
-let rateLimitCountdownTimerId = null;
+let rateLimitRefreshTimerId = null;
+let rateLimitPopupTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
 let activeAccountView = "";
@@ -601,6 +606,14 @@ function isRateLimited() {
   );
 }
 
+function rateLimitWindowSeconds(rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT) {
+  return Math.max(1, Math.ceil(rateLimit.windowMs / 1000));
+}
+
+function rateLimitSecondsLeft(rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT) {
+  return Math.max(0, Math.ceil((rateLimit.resetAt - Date.now()) / 1000));
+}
+
 function syncComposerAvailability() {
   if (DIRECT_FILE_MODE) {
     sendButton.disabled = true;
@@ -619,29 +632,30 @@ function renderRateLimit() {
   const rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT;
   const limited = isRateLimited();
   const fillRatio = rateLimit.limit > 0 ? rateLimit.remaining / rateLimit.limit : 1;
-  const secondsLeft = Math.max(0, Math.ceil((rateLimit.resetAt - Date.now()) / 1000));
+  const windowSeconds = rateLimitWindowSeconds(rateLimit);
+  const displaySeconds = limited ? rateLimitSecondsLeft(rateLimit) : windowSeconds;
 
   if (rateLimitPanel) {
     rateLimitPanel.classList.toggle("limited", limited);
   }
   if (rateLimitRemaining) {
     rateLimitRemaining.textContent =
-      `${rateLimit.remaining} / ${rateLimit.limit} messages left`;
+      `${rateLimit.remaining}/${rateLimit.limit} messages left`;
   }
   if (rateLimitFill) {
     rateLimitFill.style.setProperty("--rate-fill", String(Math.max(0, Math.min(1, fillRatio))));
   }
-  if (rateLimitCountdown) {
-    rateLimitCountdown.textContent = limited ? `Try again in ${secondsLeft}s` : "Ready";
+  if (rateLimitWindow) {
+    rateLimitWindow.textContent = `${displaySeconds} seconds`;
   }
 
-  if (rateLimitCountdownTimerId !== null) {
-    window.clearTimeout(rateLimitCountdownTimerId);
-    rateLimitCountdownTimerId = null;
+  if (rateLimitRefreshTimerId !== null) {
+    window.clearTimeout(rateLimitRefreshTimerId);
+    rateLimitRefreshTimerId = null;
   }
   if (limited) {
-    rateLimitCountdownTimerId = window.setTimeout(() => {
-      rateLimitCountdownTimerId = null;
+    rateLimitRefreshTimerId = window.setTimeout(() => {
+      rateLimitRefreshTimerId = null;
       if (Date.now() >= rateLimit.resetAt) {
         loadRateLimit();
         return;
@@ -653,9 +667,74 @@ function renderRateLimit() {
   syncComposerAvailability();
 }
 
+function renderRateLimitPopup() {
+  if (!rateLimitModal || rateLimitModal.hidden) {
+    return;
+  }
+
+  const secondsLeft = rateLimitSecondsLeft();
+  const windowSeconds = rateLimitWindowSeconds();
+  const elapsed = Math.max(0, windowSeconds - secondsLeft);
+  const progress = windowSeconds > 0 ? elapsed / windowSeconds : 1;
+  if (rateLimitPopupSeconds) {
+    rateLimitPopupSeconds.textContent = String(secondsLeft);
+  }
+  if (rateLimitPopupFill) {
+    rateLimitPopupFill.style.setProperty("--rate-popup-fill", String(Math.max(0, Math.min(1, progress))));
+  }
+
+  if (rateLimitPopupTimerId !== null) {
+    window.clearTimeout(rateLimitPopupTimerId);
+    rateLimitPopupTimerId = null;
+  }
+  if (isRateLimited()) {
+    rateLimitPopupTimerId = window.setTimeout(() => {
+      rateLimitPopupTimerId = null;
+      if (Date.now() >= currentRateLimit.resetAt) {
+        closeRateLimitPopup();
+        loadRateLimit();
+        return;
+      }
+      renderRateLimitPopup();
+    }, 1000);
+  }
+}
+
+function openRateLimitPopup() {
+  if (!rateLimitModal || !isRateLimited()) {
+    return;
+  }
+
+  rateLimitModal.hidden = false;
+  document.body.classList.add("rate-limit-open");
+  renderRateLimitPopup();
+  window.setTimeout(() => {
+    if (rateLimitOk) {
+      rateLimitOk.focus();
+    }
+  }, 70);
+}
+
+function closeRateLimitPopup() {
+  if (!rateLimitModal || rateLimitModal.hidden) {
+    return;
+  }
+
+  rateLimitModal.hidden = true;
+  document.body.classList.remove("rate-limit-open");
+  if (rateLimitPopupTimerId !== null) {
+    window.clearTimeout(rateLimitPopupTimerId);
+    rateLimitPopupTimerId = null;
+  }
+  if (!isRateLimited()) {
+    syncComposerAvailability();
+  }
+}
+
 function updateRateLimit(rateLimit) {
   currentRateLimit = normalizeRateLimit(rateLimit);
   renderRateLimit();
+  renderRateLimitPopup();
 }
 
 function accountProfilePicture() {
@@ -1448,11 +1527,6 @@ function askRetryDelay(attempt) {
   return Math.min(exponentialDelay, ASK_RETRY_MAX_DELAY_MS);
 }
 
-function retrySleepDuration(attempt, startedAt) {
-  const remaining = ASK_RETRY_MAX_ELAPSED_MS - (performance.now() - startedAt);
-  return Math.max(0, Math.min(askRetryDelay(attempt), remaining));
-}
-
 function isUsableAskResponse(data) {
   if (!data || typeof data !== "object" || data.error) {
     return false;
@@ -1466,10 +1540,6 @@ function isUsableAskResponse(data) {
     data.answer.trim() !== GENERIC_ERROR_MESSAGE &&
     data.answer.trim() !== UNKNOWN_ANSWER_MESSAGE
   );
-}
-
-function isRetryableAskFailure(data) {
-  return !data || typeof data !== "object" || data.retryable !== false;
 }
 
 async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
@@ -1606,6 +1676,7 @@ async function askLearny(message) {
 
   if (isRateLimited()) {
     renderRateLimit();
+    openRateLimitPopup();
     return;
   }
 
@@ -1635,7 +1706,9 @@ async function askLearny(message) {
         );
         if (!isUsableAskResponse(data)) {
           const error = new Error(GENERIC_ERROR_MESSAGE);
-          error.retryable = isRetryableAskFailure(data);
+          if (data && typeof data === "object") {
+            error.data = data;
+          }
           throw error;
         }
 
@@ -1666,34 +1739,14 @@ async function askLearny(message) {
             localStorage.setItem(RATE_LIMIT_SESSION_KEY, rateLimitSessionId);
           }
           updateRateLimit(error.data.rateLimit);
+          openRateLimitPopup();
           completed = true;
           continue;
         }
 
         attempt += 1;
-        const elapsed = performance.now() - thoughtStartedAt;
-        const retryable = error.retryable !== false;
-        const canRetry =
-          retryable &&
-          attempt < ASK_RETRY_MAX_ATTEMPTS &&
-          elapsed < ASK_RETRY_MAX_ELAPSED_MS;
-
-        if (!canRetry) {
-          typing.remove();
-          const thoughtSeconds = elapsed / 1000;
-          addMessage({
-            speaker: "Learny",
-            text: GENERIC_ERROR_MESSAGE,
-            source: "error",
-            thoughtSeconds,
-          });
-          setConnection("offline", "Servers offline");
-          completed = true;
-          continue;
-        }
-
         setConnection("checking", "Checking server status...");
-        await sleep(retrySleepDuration(attempt, thoughtStartedAt));
+        await sleep(askRetryDelay(attempt));
       }
     }
   } finally {
@@ -1909,6 +1962,7 @@ chatForm.addEventListener("submit", (event) => {
   }
   if (isRateLimited()) {
     renderRateLimit();
+    openRateLimitPopup();
     return;
   }
   messageInput.value = "";
@@ -1938,6 +1992,18 @@ if (accountModalBackdrop) {
 
 if (accountModalClose) {
   accountModalClose.addEventListener("click", () => closeAccountModal());
+}
+
+if (rateLimitBackdrop) {
+  rateLimitBackdrop.addEventListener("click", closeRateLimitPopup);
+}
+
+if (rateLimitClose) {
+  rateLimitClose.addEventListener("click", closeRateLimitPopup);
+}
+
+if (rateLimitOk) {
+  rateLimitOk.addEventListener("click", closeRateLimitPopup);
 }
 
 if (signInForm) {
@@ -2033,6 +2099,10 @@ if (mobileSidebarMedia) {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (rateLimitModal && !rateLimitModal.hidden) {
+      closeRateLimitPopup();
+      return;
+    }
     if (accountModal && !accountModal.hidden) {
       closeAccountModal();
       return;

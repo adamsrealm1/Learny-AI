@@ -173,12 +173,12 @@ class LearnyGroqOnlyTests(unittest.TestCase):
             },
         )
 
-    def test_no_generator_is_not_retryable(self) -> None:
+    def test_no_generator_is_retryable(self) -> None:
         with run_test_server(lambda: None) as base_url:
             data = post_json(base_url, "/api/ask", {"message": "hello"})
 
         self.assertEqual(data["source"], "unknown")
-        self.assertFalse(data["retryable"])
+        self.assertTrue(data["retryable"])
 
     def test_generated_answer_comes_from_groq(self) -> None:
         with run_test_server(StaticAnswerGenerator) as base_url:
@@ -193,12 +193,12 @@ class LearnyGroqOnlyTests(unittest.TestCase):
             {"sessionId", "answer", "source", "model", "retryable", "rateSessionId", "rateLimit"},
         )
 
-    def test_failed_generator_chain_is_not_retried_by_browser(self) -> None:
+    def test_failed_generator_chain_is_retryable_by_browser(self) -> None:
         with run_test_server(NoAnswerGenerator) as base_url:
             data = post_json(base_url, "/api/ask", {"message": "im bored"})
 
         self.assertEqual(data["source"], "unknown")
-        self.assertFalse(data["retryable"])
+        self.assertTrue(data["retryable"])
 
 
 class run_test_server:

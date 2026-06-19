@@ -315,7 +315,48 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             )
             session_id, session_history = session_store.get(requested_session_id)
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            rate_limit = database.consume_rate_limit(_rate_limit_identity(account, rate_session_id))
+            rate_limit_identity = _rate_limit_identity(account, rate_session_id)
+            rate_limit = database.peek_rate_limit(rate_limit_identity)
+            if not rate_limit.get("allowed", False):
+                self._send_json(
+                    {
+                        "sessionId": session_id,
+                        "rateSessionId": rate_session_id,
+                        "error": GENERIC_ERROR_MESSAGE,
+                        "retryable": False,
+                        "rateLimit": _public_rate_limit(rate_limit),
+                    },
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    extra_headers=[_retry_after_header(rate_limit)],
+                )
+                return
+
+            if account is not None and chat_id:
+                history = database.history_for_chat(int(account["id"]), chat_id, max_turns=8)
+            else:
+                history = session_history
+
+            bot = Learny(
+                generator=config.generator_factory(),
+                history=history,
+            )
+            response = bot.reply(message)
+
+            if response.source == "unknown":
+                self._send_json(
+                    {
+                        "sessionId": session_id,
+                        "answer": response.answer,
+                        "source": response.source,
+                        "model": response.model,
+                        "retryable": True,
+                        "rateSessionId": rate_session_id,
+                        "rateLimit": _public_rate_limit(rate_limit),
+                    }
+                )
+                return
+
+            rate_limit = database.consume_rate_limit(rate_limit_identity)
             if not rate_limit.get("allowed", False):
                 self._send_json(
                     {
@@ -337,16 +378,6 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     title=_chat_title_from_message(message),
                     session_id=session_id,
                 )
-                history = database.history_for_chat(int(account["id"]), chat_id, max_turns=8)
-            else:
-                history = session_history
-
-            bot = Learny(
-                generator=config.generator_factory(),
-                history=history,
-            )
-            response = bot.reply(message)
-            if account is not None and chat_id:
                 database.append_message(
                     int(account["id"]),
                     chat_id,

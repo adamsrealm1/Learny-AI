@@ -41,6 +41,15 @@ class CountingAnswerGenerator(StaticAnswerGenerator):
         return super().generate(question, history)
 
 
+class NoAnswerGenerator:
+    def generate(
+        self,
+        question: str,
+        history: ConversationHistory,
+    ) -> GeneratedAnswer | None:
+        return None
+
+
 class AccountWebTests(unittest.TestCase):
     def test_create_account_sets_cookie_and_reports_stats(self) -> None:
         with run_account_server() as server:
@@ -230,6 +239,24 @@ class AccountWebTests(unittest.TestCase):
 
         self.assertEqual(blocked["status"], 429)
         self.assertTrue(blocked["data"]["rateLimit"]["limited"])
+
+    def test_failed_answer_does_not_consume_rate_limit_or_save_chat_messages(self) -> None:
+        with run_account_server(NoAnswerGenerator) as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "failed_answer_user", "password": "strong-password"},
+            )
+            failed = server.post_json(
+                "/api/ask",
+                {"message": "temporary outage", "chatId": "failed-answer-chat"},
+            )
+            rate_limit = server.get_json("/api/rate-limit")
+            chats = server.get_json("/api/chats")
+
+        self.assertEqual(failed["source"], "unknown")
+        self.assertTrue(failed["retryable"])
+        self.assertEqual(rate_limit["rateLimit"]["remaining"], 25)
+        self.assertEqual(chats["chats"], [])
 
     def test_delete_account_removes_session_and_saved_chats(self) -> None:
         with run_account_server() as server:
