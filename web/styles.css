@@ -493,6 +493,7 @@ body.account-modal-open {
   margin: 0;
   color: rgba(232, 232, 240, 0.72);
   line-height: 1.55;
+  white-space: pre-line;
 }
 
 .rate-limit-countdown-card {

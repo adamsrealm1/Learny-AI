@@ -723,8 +723,9 @@ function renderRateLimitPopup() {
   const progress = windowSeconds > 0 ? elapsed / windowSeconds : 1;
   const resetParts = rateLimitResetParts();
   if (rateLimitDescription) {
-    rateLimitDescription.textContent =
-      `Learny allows ${currentRateLimit.limit} ${pluralize(currentRateLimit.limit, "message")} per day. Your next message unlocks when the reset timer finishes.`;
+    rateLimitDescription.textContent = currentAccount
+      ? "You've hit your rate limit for Learny AI.\nYour rate limit will reset when the timer below finishes."
+      : "You've hit your rate limit for Learny AI. Create a free account to get 200 messages a day.\nYour rate limit will reset when the timer below finishes.";
   }
   if (rateLimitPopupSeconds) {
     rateLimitPopupSeconds.textContent = String(resetParts.value);
