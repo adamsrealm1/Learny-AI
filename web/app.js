@@ -661,10 +661,9 @@ function syncComposerAvailability() {
     return;
   }
 
-  const blocked = isRateLimited();
   if (!isSending) {
-    sendButton.disabled = blocked;
-    messageInput.disabled = blocked;
+    sendButton.disabled = false;
+    messageInput.disabled = false;
   }
 }
 
@@ -1740,7 +1739,7 @@ async function askLearny(message) {
 
   if (isRateLimited()) {
     renderRateLimit();
-    openRateLimitPopup();
+    openRateLimitPopup({ force: true });
     return;
   }
 

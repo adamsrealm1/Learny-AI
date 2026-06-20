@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI</title>
-    <link rel="stylesheet" href="./web/styles.css?v=adminreset1">
+    <link rel="stylesheet" href="./web/styles.css?v=warningicon1">
   </head>
   <body>
     <div class="app-shell">
@@ -238,14 +238,11 @@
         <button class="rate-limit-close" id="rateLimitClose" type="button" aria-label="Close rate limit popup">
           <img class="ui-icon x-icon" src="./icon_library/X.png" alt="" aria-hidden="true">
         </button>
-        <div class="rate-limit-orbit" aria-hidden="true">
-          <span></span>
-        </div>
+        <span class="rate-limit-warning-icon" aria-hidden="true"></span>
         <div class="rate-limit-dialog-copy">
-          <p class="rate-limit-kicker">Message limit</p>
           <h2 id="rateLimitTitle">Rate limit reached</h2>
           <p id="rateLimitDescription">
-            Learny allows a daily message limit. Your next message unlocks when the reset timer finishes.
+            Learny has a daily message limit. Your next message unlocks when the reset timer finishes.
           </p>
         </div>
         <div class="rate-limit-countdown-card">
@@ -255,7 +252,7 @@
         <div class="rate-limit-dialog-meter" aria-hidden="true">
           <span id="rateLimitPopupFill"></span>
         </div>
-        <button class="rate-limit-ok" id="rateLimitOk" type="button">Got it</button>
+        <button class="rate-limit-ok" id="rateLimitOk" type="button">Got it!</button>
       </section>
     </div>
 
@@ -270,6 +267,6 @@
     </template>
 
     <script src="./web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./web/app.js?v=adminreset1" defer></script>
+    <script src="./web/app.js?v=limitinput1" defer></script>
   </body>
 </html>
