@@ -272,6 +272,40 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(status["rateLimit"]["limit"], 200)
         self.assertEqual(status["rateLimit"]["remaining"], 200)
 
+    def test_rate_limit_reset_time_is_global_midnight_edt(self) -> None:
+        with run_account_server() as server:
+            guest_status = server.get_json("/api/rate-limit")["rateLimit"]
+            guest_answer = server.post_json(
+                "/api/ask",
+                {"message": "guest reset check", "sessionId": "guest-reset-check"},
+            )["rateLimit"]
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "reset_time_user_one", "password": "strong-password"},
+            )
+            first_account_status = server.get_json("/api/rate-limit")["rateLimit"]
+            first_account_answer = server.post_json(
+                "/api/ask",
+                {"message": "account reset check", "chatId": "reset-time-chat"},
+            )["rateLimit"]
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "reset_time_user_two", "password": "strong-password"},
+            )
+            second_account_status = server.get_json("/api/rate-limit")["rateLimit"]
+
+        reset_times = {
+            guest_status["resetAt"],
+            guest_answer["resetAt"],
+            first_account_status["resetAt"],
+            first_account_answer["resetAt"],
+            second_account_status["resetAt"],
+        }
+        self.assertEqual(len(reset_times), 1)
+        self.assertEqual(guest_status["windowMs"], 86_400_000)
+        self.assertEqual(guest_status["resetAt"] % 86_400_000, 4 * 60 * 60 * 1000)
+
     def test_adamsrealm1_can_reset_everyones_rate_limits(self) -> None:
         with run_account_server() as server:
             server.post_json(

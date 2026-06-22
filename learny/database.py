@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import secrets
@@ -18,6 +19,7 @@ PASSWORD_ITERATIONS = 210_000
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 RATE_LIMIT_LIMIT = 200
 RATE_LIMIT_WINDOW_MS = 86_400_000
+RATE_LIMIT_RESET_TIMEZONE = timezone(timedelta(hours=-4), "EDT")
 
 
 class AccountError(ValueError):
@@ -663,19 +665,14 @@ def _clean_rate_limit_identity(identity_key: str) -> str:
 def _rate_limit_payload(
     *,
     active_timestamps: list[int],
-    now: int,
     allowed: bool,
     limit: int,
     window_ms: int,
+    reset_at: int,
 ) -> dict[str, Any]:
     active_timestamps.sort()
     active_count = len(active_timestamps)
     remaining = max(0, limit - active_count)
-    reset_at = (
-        active_timestamps[0] + window_ms
-        if active_timestamps
-        else now + window_ms
-    )
     return {
         "limit": limit,
         "remaining": remaining,
@@ -684,6 +681,15 @@ def _rate_limit_payload(
         "limited": remaining <= 0,
         "allowed": allowed,
     }
+
+
+def _rate_limit_window(now: int) -> tuple[int, int, int]:
+    local_now = datetime.fromtimestamp(now / 1000, RATE_LIMIT_RESET_TIMEZONE)
+    window_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    reset_at = window_start + timedelta(days=1)
+    window_start_ms = int(window_start.timestamp() * 1000)
+    reset_at_ms = int(reset_at.timestamp() * 1000)
+    return window_start_ms, reset_at_ms, reset_at_ms - window_start_ms
 
 
 def _sqlite_rate_limit_snapshot(
@@ -695,26 +701,26 @@ def _sqlite_rate_limit_snapshot(
     window_ms: int,
 ) -> dict[str, Any]:
     now = _now_ms()
-    window_start = now - window_ms
-    connection.execute("DELETE FROM rate_limit_events WHERE created_at <= ?", (window_start,))
+    window_start, reset_at, actual_window_ms = _rate_limit_window(now)
+    connection.execute("DELETE FROM rate_limit_events WHERE created_at < ?", (window_start,))
     rows = connection.execute(
         """
         SELECT created_at
         FROM rate_limit_events
-        WHERE identity_key = ? AND created_at > ?
+        WHERE identity_key = ? AND created_at >= ? AND created_at < ?
         ORDER BY created_at ASC
         """,
-        (identity_key, window_start),
+        (identity_key, window_start, reset_at),
     ).fetchall()
     active_timestamps = [int(row["created_at"]) for row in rows]
 
     if len(active_timestamps) >= limit:
         return _rate_limit_payload(
             active_timestamps=active_timestamps,
-            now=now,
             allowed=False,
             limit=limit,
-            window_ms=window_ms,
+            window_ms=actual_window_ms,
+            reset_at=reset_at,
         )
 
     if consume:
@@ -726,10 +732,10 @@ def _sqlite_rate_limit_snapshot(
 
     return _rate_limit_payload(
         active_timestamps=active_timestamps,
-        now=now,
         allowed=True,
         limit=limit,
-        window_ms=window_ms,
+        window_ms=actual_window_ms,
+        reset_at=reset_at,
     )
 
 

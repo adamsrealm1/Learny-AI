@@ -28,6 +28,7 @@ from .database import (
     _message_from_row,
     _now_ms,
     _rate_limit_payload,
+    _rate_limit_window,
     _validate_password,
 )
 
@@ -394,26 +395,26 @@ class MySQLLearnyDatabase:
         window_ms: int,
     ) -> dict[str, Any]:
         now = _now_ms()
-        window_start = now - window_ms
-        cursor.execute("DELETE FROM rate_limit_events WHERE created_at <= %s", (window_start,))
+        window_start, reset_at, actual_window_ms = _rate_limit_window(now)
+        cursor.execute("DELETE FROM rate_limit_events WHERE created_at < %s", (window_start,))
         cursor.execute(
             """
             SELECT created_at
             FROM rate_limit_events
-            WHERE identity_key = %s AND created_at > %s
+            WHERE identity_key = %s AND created_at >= %s AND created_at < %s
             ORDER BY created_at ASC
             """,
-            (identity_key, window_start),
+            (identity_key, window_start, reset_at),
         )
         active_timestamps = [int(row["created_at"]) for row in cursor.fetchall()]
 
         if len(active_timestamps) >= limit:
             return _rate_limit_payload(
                 active_timestamps=active_timestamps,
-                now=now,
                 allowed=False,
                 limit=limit,
-                window_ms=window_ms,
+                window_ms=actual_window_ms,
+                reset_at=reset_at,
             )
 
         if consume:
@@ -425,10 +426,10 @@ class MySQLLearnyDatabase:
 
         return _rate_limit_payload(
             active_timestamps=active_timestamps,
-            now=now,
             allowed=True,
             limit=limit,
-            window_ms=window_ms,
+            window_ms=actual_window_ms,
+            reset_at=reset_at,
         )
 
     def list_chats(self, account_id: int) -> list[dict[str, Any]]:
