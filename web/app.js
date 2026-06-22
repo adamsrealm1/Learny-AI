@@ -583,22 +583,27 @@ function normalizeRateLimit(rateLimit) {
   const limit = Number.isFinite(rateLimit.limit) && rateLimit.limit > 0
     ? Math.floor(rateLimit.limit)
     : DEFAULT_RATE_LIMIT.limit;
-  const remaining = Number.isFinite(rateLimit.remaining)
+  let remaining = Number.isFinite(rateLimit.remaining)
     ? Math.max(0, Math.min(limit, Math.floor(rateLimit.remaining)))
     : limit;
   const windowMs = Number.isFinite(rateLimit.windowMs) && rateLimit.windowMs > 0
     ? Math.floor(rateLimit.windowMs)
     : DEFAULT_RATE_LIMIT.windowMs;
-  const resetAt = Number.isFinite(rateLimit.resetAt) && rateLimit.resetAt > 0
+  let resetAt = Number.isFinite(rateLimit.resetAt) && rateLimit.resetAt > 0
     ? Math.floor(rateLimit.resetAt)
     : Date.now() + windowMs;
+  const now = Date.now();
+  if (resetAt <= now) {
+    remaining = limit;
+    resetAt = now + windowMs;
+  }
 
   return {
     limit,
     remaining,
     windowMs,
     resetAt,
-    limited: Boolean(rateLimit.limited) && Date.now() < resetAt,
+    limited: Boolean(rateLimit.limited) && now < resetAt,
   };
 }
 
@@ -669,7 +674,17 @@ function syncComposerAvailability() {
 }
 
 function renderRateLimit() {
-  const rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT;
+  let rateLimit = currentRateLimit || DEFAULT_RATE_LIMIT;
+  if (Date.now() >= rateLimit.resetAt) {
+    currentRateLimit = {
+      ...rateLimit,
+      remaining: rateLimit.limit,
+      resetAt: Date.now() + rateLimit.windowMs,
+      limited: false,
+    };
+    rateLimit = currentRateLimit;
+    window.setTimeout(loadRateLimit, 0);
+  }
   const limited = isRateLimited();
   const fillRatio = rateLimit.limit > 0 ? rateLimit.remaining / rateLimit.limit : 1;
   const percent = rateLimitPercent(rateLimit);

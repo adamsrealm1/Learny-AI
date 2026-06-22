@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from learny.database import LearnyDatabase
+from learny.database import LearnyDatabase, _rate_limit_window
 from learny.mysql_database import mysql_config_from_env
 from learny.storage import create_learny_database
 
@@ -69,6 +69,39 @@ class WasmerStorageTests(unittest.TestCase):
 
         self.assertIsInstance(database, LearnyDatabase)
         self.assertEqual(database.backend_name, "sqlite")
+
+    def test_rate_limit_global_reset_keeps_only_current_window_events(self) -> None:
+        now = 1_781_625_600_000
+        window_start, reset_at, _window_ms = _rate_limit_window(now)
+
+        with TemporaryDirectory() as temp_dir:
+            database = LearnyDatabase(Path(temp_dir) / "learny.sqlite3")
+            with database._connect() as connection:
+                connection.executemany(
+                    "INSERT INTO rate_limit_events (identity_key, created_at) VALUES (?, ?)",
+                    [
+                        ("global:signed-in", window_start - 10_000),
+                        ("global:signed-in", reset_at + 10_000),
+                        ("global:signed-in", window_start + 10_000),
+                        ("global:guest", window_start - 5_000),
+                    ],
+                )
+
+            with patch("learny.database._now_ms", return_value=now):
+                signed_in_limit = database.peek_rate_limit("global:signed-in", limit=200)
+                guest_limit = database.peek_rate_limit("global:guest", limit=30)
+
+            with database._connect() as connection:
+                rows = connection.execute(
+                    "SELECT identity_key, created_at FROM rate_limit_events ORDER BY created_at"
+                ).fetchall()
+
+        self.assertEqual(signed_in_limit["remaining"], 199)
+        self.assertEqual(guest_limit["remaining"], 30)
+        self.assertEqual(
+            [(row["identity_key"], row["created_at"]) for row in rows],
+            [("global:signed-in", window_start + 10_000)],
+        )
 
 
 if __name__ == "__main__":

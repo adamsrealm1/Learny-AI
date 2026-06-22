@@ -396,7 +396,10 @@ class MySQLLearnyDatabase:
     ) -> dict[str, Any]:
         now = _now_ms()
         window_start, reset_at, actual_window_ms = _rate_limit_window(now)
-        cursor.execute("DELETE FROM rate_limit_events WHERE created_at < %s", (window_start,))
+        cursor.execute(
+            "DELETE FROM rate_limit_events WHERE created_at < %s OR created_at >= %s",
+            (window_start, reset_at),
+        )
         cursor.execute(
             """
             SELECT created_at

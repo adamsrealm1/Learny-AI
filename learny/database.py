@@ -702,7 +702,10 @@ def _sqlite_rate_limit_snapshot(
 ) -> dict[str, Any]:
     now = _now_ms()
     window_start, reset_at, actual_window_ms = _rate_limit_window(now)
-    connection.execute("DELETE FROM rate_limit_events WHERE created_at < ?", (window_start,))
+    connection.execute(
+        "DELETE FROM rate_limit_events WHERE created_at < ? OR created_at >= ?",
+        (window_start, reset_at),
+    )
     rows = connection.execute(
         """
         SELECT created_at
