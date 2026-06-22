@@ -67,7 +67,7 @@ const X_ICON_PATH = "./icon_library/X.png";
 const PROFILE_ICON_PATH = "./icon_library/profile.png";
 const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-const COPY_RESET_DELAY_MS = 1400;
+const COPY_RESET_DELAY_MS = 10000;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
 const WORD_REVEAL_FOOTER_DELAY_MS = 850;
@@ -124,6 +124,7 @@ let rateLimitPopupTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
 let activeAccountView = "";
+let serverOnlineSeen = false;
 const mobileSidebarMedia = window.matchMedia
   ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
   : null;
@@ -1262,6 +1263,30 @@ function setConnection(state, label) {
   connectionPill.querySelector("strong").textContent = label;
 }
 
+function releaseLoadingScreen() {
+  if (window.LearnyLoading && typeof window.LearnyLoading.release === "function") {
+    window.LearnyLoading.release();
+    return;
+  }
+
+  const loader = document.getElementById("loadingScreen");
+  document.body.classList.remove("site-loading");
+  document.body.classList.add("site-loaded");
+  if (loader) {
+    loader.remove();
+  }
+}
+
+function handleServerOnline() {
+  releaseLoadingScreen();
+  if (serverOnlineSeen) {
+    return;
+  }
+  serverOnlineSeen = true;
+  loadAccountAndChats();
+  loadRateLimit();
+}
+
 function sourceLabel() {
   return "";
 }
@@ -1701,7 +1726,11 @@ async function loadStatus() {
       { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
       API_BASE_CANDIDATES,
     );
-    setConnection(status.ok ? "online" : "offline", status.ok ? "Servers online" : "Servers offline");
+    const online = Boolean(status.ok);
+    setConnection(online ? "online" : "offline", online ? "Servers online" : "Servers offline");
+    if (online) {
+      handleServerOnline();
+    }
   } catch (error) {
     if (isSending) {
       setConnection("checking", "Checking server status...");
