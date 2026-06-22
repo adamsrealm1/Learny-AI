@@ -70,7 +70,7 @@ const PROFILE_ICON_PATH = "./icon_library/profile.png";
 const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const COPY_RESET_DELAY_MS = 10000;
-const MESSAGE_DELETE_DURATION_MS = 2000;
+const MESSAGE_DELETE_DURATION_MS = 850;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
 const WORD_REVEAL_FOOTER_DELAY_MS = 850;
@@ -388,6 +388,7 @@ function createTextActionButton(label, className, onClick, iconPath = "") {
   }
 
   const labelNode = document.createElement("span");
+  labelNode.className = "sr-only";
   labelNode.textContent = label;
   button.append(labelNode);
   button.addEventListener("click", onClick);
@@ -1481,22 +1482,37 @@ function messageIndicesForTurn(chat, messageIndex) {
   return indices;
 }
 
-function updateStoredUserMessage(messageIndex, text) {
+async function resendEditedUserMessage(messageIndex, text) {
   const chat = getActiveChat();
-  if (!chat || !Number.isInteger(messageIndex) || messageIndex < 0) {
+  if (DIRECT_FILE_MODE || !chat || !Number.isInteger(messageIndex) || messageIndex < 0 || isSending) {
     return false;
   }
   const message = chat.messages[messageIndex];
   if (!message || message.speaker !== "You") {
     return false;
   }
+  if (isRateLimited()) {
+    renderRateLimit();
+    openRateLimitPopup({ force: true });
+    return false;
+  }
 
-  message.text = text;
+  chat.messages = chat.messages.slice(0, messageIndex);
+  chat.sessionId = createId("session");
+  sessionId = chat.sessionId;
+  localStorage.setItem(SESSION_KEY, sessionId);
+
   chat.updatedAt = Date.now();
   refreshChatTitle(chat);
   saveChats();
+  if (currentAccount && serverChatsLoaded) {
+    await syncChatsToServer();
+  }
+
+  addMessage({ speaker: "You", text, source: "sent" });
   renderChatList();
   renderActiveChat();
+  askLearny(text, { addUserMessage: false });
   return true;
 }
 
@@ -1540,12 +1556,26 @@ function startUserMessageEdit(node, messageIndex, originalText) {
   const cancelButton = document.createElement("button");
   cancelButton.className = "message-edit-cancel";
   cancelButton.type = "button";
-  cancelButton.textContent = "Cancel";
+  cancelButton.title = "Cancel";
+  cancelButton.setAttribute("aria-label", "Cancel edit");
+  const cancelIcon = document.createElement("img");
+  cancelIcon.className = "ui-icon message-edit-action-icon";
+  cancelIcon.src = X_ICON_PATH;
+  cancelIcon.alt = "";
+  cancelIcon.setAttribute("aria-hidden", "true");
+  cancelButton.append(cancelIcon);
 
   const saveButton = document.createElement("button");
   saveButton.className = "message-edit-save";
   saveButton.type = "submit";
-  saveButton.textContent = "Save";
+  saveButton.title = "Save and resend";
+  saveButton.setAttribute("aria-label", "Save and resend");
+  const saveIcon = document.createElement("img");
+  saveIcon.className = "ui-icon message-edit-action-icon";
+  saveIcon.src = CHECK_ICON_PATH;
+  saveIcon.alt = "";
+  saveIcon.setAttribute("aria-hidden", "true");
+  saveButton.append(saveIcon);
 
   actions.append(cancelButton, saveButton);
   form.append(textarea, actions);
@@ -1565,14 +1595,16 @@ function startUserMessageEdit(node, messageIndex, originalText) {
       form.requestSubmit();
     }
   });
-  form.addEventListener("submit", (event) => {
+  form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const nextText = textarea.value.trim();
     if (!nextText) {
       textarea.focus();
       return;
     }
-    updateStoredUserMessage(messageIndex, nextText);
+    saveButton.disabled = true;
+    cancelButton.disabled = true;
+    await resendEditedUserMessage(messageIndex, nextText);
   });
 
   textNode.replaceWith(form);
@@ -1659,6 +1691,7 @@ function displayMessage(
   node.querySelector(".speaker").textContent = speaker;
   node.querySelector(".source").textContent = source === "error" ? "" : source;
   const bubble = node.querySelector(".bubble");
+  bubble.dataset.glitch = text.replace(/\s+/g, " ").trim().slice(0, 240);
   const textNode = document.createElement("div");
   textNode.className = "bubble-text markdown-body";
   textNode.innerHTML = renderMessageHtml(text);
@@ -2010,7 +2043,7 @@ async function loadRateLimit() {
   }
 }
 
-async function askLearny(message) {
+async function askLearny(message, { addUserMessage = true } = {}) {
   if (DIRECT_FILE_MODE) {
     return;
   }
@@ -2023,7 +2056,9 @@ async function askLearny(message) {
 
   const chat = ensureActiveChat();
   sessionId = chat.sessionId;
-  addMessage({ speaker: "You", text: message, source: "sent" });
+  if (addUserMessage) {
+    addMessage({ speaker: "You", text: message, source: "sent" });
+  }
 
   const typing = addTyping();
   const thoughtStartedAt = performance.now();
