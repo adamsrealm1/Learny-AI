@@ -63,11 +63,14 @@ const SESSION_KEY = "learny-session-id";
 const RATE_LIMIT_SESSION_KEY = "learny-rate-limit-session-id";
 const COPY_ICON_PATH = "./icon_library/copy.png";
 const CHECK_ICON_PATH = "./icon_library/check.png";
+const EDIT_ICON_PATH = "./icon_library/edit.png";
+const DELETE_ICON_PATH = "./icon_library/delete.png";
 const X_ICON_PATH = "./icon_library/X.png";
 const PROFILE_ICON_PATH = "./icon_library/profile.png";
 const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const COPY_RESET_DELAY_MS = 10000;
+const MESSAGE_DELETE_DURATION_MS = 2000;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
 const WORD_REVEAL_FOOTER_DELAY_MS = 850;
@@ -323,10 +326,13 @@ async function copyTextToClipboard(text) {
 
 function setCopyButtonState(button, copied) {
   const icon = button.querySelector("img");
-  if (!icon) {
-    return;
+  if (icon) {
+    icon.src = copied ? CHECK_ICON_PATH : COPY_ICON_PATH;
   }
-  icon.src = copied ? CHECK_ICON_PATH : COPY_ICON_PATH;
+  const label = button.querySelector("[data-copy-label]");
+  if (label) {
+    label.textContent = copied ? "Copied" : "Copy";
+  }
   button.classList.toggle("copied", copied);
   button.title = copied ? "Copied" : "Copy message";
   button.setAttribute("aria-label", copied ? "Copied" : "Copy message");
@@ -345,6 +351,61 @@ async function handleCopyMessage(button, text) {
     setCopyButtonState(button, false);
     button.disabled = false;
   }
+}
+
+function createIconCopyButton(text) {
+  const copyButton = document.createElement("button");
+  copyButton.className = "message-copy-button";
+  copyButton.type = "button";
+  copyButton.title = "Copy message";
+  copyButton.setAttribute("aria-label", "Copy message");
+
+  const copyIcon = document.createElement("img");
+  copyIcon.className = "ui-icon message-copy-icon";
+  copyIcon.src = COPY_ICON_PATH;
+  copyIcon.alt = "";
+  copyIcon.setAttribute("aria-hidden", "true");
+
+  copyButton.append(copyIcon);
+  copyButton.addEventListener("click", () => handleCopyMessage(copyButton, text));
+  return copyButton;
+}
+
+function createTextActionButton(label, className, onClick, iconPath = "") {
+  const button = document.createElement("button");
+  button.className = `message-text-action ${className}`;
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+
+  if (iconPath) {
+    const icon = document.createElement("img");
+    icon.className = "ui-icon message-action-icon";
+    icon.src = iconPath;
+    icon.alt = "";
+    icon.setAttribute("aria-hidden", "true");
+    button.append(icon);
+  }
+
+  const labelNode = document.createElement("span");
+  labelNode.textContent = label;
+  button.append(labelNode);
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function createTextCopyButton(text) {
+  const button = createTextActionButton("Copy", "message-copy-text-button", () =>
+    handleCopyMessage(button, text),
+    COPY_ICON_PATH,
+  );
+  const label = button.querySelector("span");
+  if (label) {
+    label.dataset.copyLabel = "";
+  }
+  button.title = "Copy message";
+  button.setAttribute("aria-label", "Copy message");
+  return button;
 }
 
 function clearMessageSearch() {
@@ -1398,13 +1459,202 @@ function clearMessages() {
   chatLog.querySelectorAll(".message").forEach((message) => message.remove());
 }
 
+function refreshChatTitle(chat) {
+  const firstUserMessage = chat.messages.find((message) => message.speaker === "You");
+  chat.title = firstUserMessage ? titleFromMessage(firstUserMessage.text) : "New chat";
+}
+
+function messageIndicesForTurn(chat, messageIndex) {
+  if (!chat || !Number.isInteger(messageIndex) || messageIndex < 0) {
+    return [];
+  }
+  const message = chat.messages[messageIndex];
+  if (!message || message.speaker !== "You") {
+    return [];
+  }
+
+  const indices = [messageIndex];
+  const nextMessage = chat.messages[messageIndex + 1];
+  if (nextMessage && nextMessage.speaker === "Learny") {
+    indices.push(messageIndex + 1);
+  }
+  return indices;
+}
+
+function updateStoredUserMessage(messageIndex, text) {
+  const chat = getActiveChat();
+  if (!chat || !Number.isInteger(messageIndex) || messageIndex < 0) {
+    return false;
+  }
+  const message = chat.messages[messageIndex];
+  if (!message || message.speaker !== "You") {
+    return false;
+  }
+
+  message.text = text;
+  chat.updatedAt = Date.now();
+  refreshChatTitle(chat);
+  saveChats();
+  renderChatList();
+  renderActiveChat();
+  return true;
+}
+
+function startUserMessageEdit(node, messageIndex, originalText) {
+  if (!node || !Number.isInteger(messageIndex) || isSending) {
+    return;
+  }
+
+  const bubble = node.querySelector(".bubble");
+  const textNode = node.querySelector(".bubble-text");
+  if (!bubble || !textNode || node.classList.contains("is-editing")) {
+    return;
+  }
+
+  const existingEdit = chatLog.querySelector(".message.is-editing");
+  if (existingEdit && existingEdit !== node) {
+    renderActiveChat();
+    const nextNode = chatLog.querySelector(`.message[data-message-index="${messageIndex}"]`);
+    if (nextNode) {
+      startUserMessageEdit(nextNode, messageIndex, originalText);
+    }
+    return;
+  }
+
+  node.classList.add("is-editing");
+
+  const form = document.createElement("form");
+  form.className = "message-edit-form";
+
+  const textarea = document.createElement("textarea");
+  textarea.className = "message-edit-input";
+  textarea.name = "editedMessage";
+  textarea.maxLength = 1200;
+  textarea.rows = Math.min(8, Math.max(2, originalText.split(/\r?\n/).length));
+  textarea.value = originalText;
+  textarea.setAttribute("aria-label", "Edit message");
+
+  const actions = document.createElement("div");
+  actions.className = "message-edit-actions";
+
+  const cancelButton = document.createElement("button");
+  cancelButton.className = "message-edit-cancel";
+  cancelButton.type = "button";
+  cancelButton.textContent = "Cancel";
+
+  const saveButton = document.createElement("button");
+  saveButton.className = "message-edit-save";
+  saveButton.type = "submit";
+  saveButton.textContent = "Save";
+
+  actions.append(cancelButton, saveButton);
+  form.append(textarea, actions);
+
+  function closeEditor() {
+    renderActiveChat();
+  }
+
+  cancelButton.addEventListener("click", closeEditor);
+  textarea.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeEditor();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const nextText = textarea.value.trim();
+    if (!nextText) {
+      textarea.focus();
+      return;
+    }
+    updateStoredUserMessage(messageIndex, nextText);
+  });
+
+  textNode.replaceWith(form);
+  window.setTimeout(() => {
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, 40);
+}
+
+function deleteMessageTurn(messageIndex) {
+  const chat = getActiveChat();
+  const indices = messageIndicesForTurn(chat, messageIndex);
+  if (indices.length === 0) {
+    return;
+  }
+
+  const deletingLatestPendingMessage =
+    isSending && indices.includes(chat.messages.length - 1) && indices.length === 1;
+  if (deletingLatestPendingMessage) {
+    return;
+  }
+
+  const nodes = [...chatLog.querySelectorAll(".message")].filter((node) =>
+    indices.includes(Number(node.dataset.messageIndex)),
+  );
+  nodes.forEach((node) => node.classList.add("is-deleting"));
+
+  window.setTimeout(() => {
+    chat.messages = chat.messages.filter((_, index) => !indices.includes(index));
+    chat.updatedAt = Date.now();
+    refreshChatTitle(chat);
+    saveChats();
+    renderChatList();
+    renderActiveChat();
+  }, MESSAGE_DELETE_DURATION_MS);
+}
+
+function appendLearnyFooter(bubble, text, thoughtSeconds) {
+  const footer = document.createElement("div");
+  footer.className = "message-footer";
+
+  const thought = document.createElement("span");
+  thought.className = "thought-time";
+  thought.textContent = `Thought for ${formatThoughtSeconds(thoughtSeconds)} seconds`;
+
+  footer.append(thought, createIconCopyButton(text));
+  bubble.append(footer);
+}
+
+function appendUserFooter(bubble, text, messageIndex, node) {
+  if (!Number.isInteger(messageIndex)) {
+    return;
+  }
+
+  const footer = document.createElement("div");
+  footer.className = "message-footer user-message-footer";
+  footer.append(
+    createTextCopyButton(text),
+    createTextActionButton("Edit", "message-edit-button", () =>
+      startUserMessageEdit(node, messageIndex, text),
+      EDIT_ICON_PATH,
+    ),
+    createTextActionButton(
+      "Delete",
+      "message-delete-button",
+      () => deleteMessageTurn(messageIndex),
+      DELETE_ICON_PATH,
+    ),
+  );
+  bubble.append(footer);
+}
+
 function displayMessage(
   { speaker, text, source = "", thoughtSeconds = null },
-  { animateWords: shouldAnimateWords = false } = {},
+  { animateWords: shouldAnimateWords = false, messageIndex = null } = {},
 ) {
   setEmptyState(false);
   const node = messageTemplate.content.firstElementChild.cloneNode(true);
   node.classList.add(speaker === "You" ? "user" : "learny");
+  if (Number.isInteger(messageIndex)) {
+    node.dataset.messageIndex = String(messageIndex);
+  }
   node.dataset.searchText = `${speaker} ${source} ${text}`.toLowerCase();
   node.querySelector(".speaker").textContent = speaker;
   node.querySelector(".source").textContent = source === "error" ? "" : source;
@@ -1426,29 +1676,9 @@ function displayMessage(
   bubble.replaceChildren(textNode);
 
   if (speaker === "Learny") {
-    const footer = document.createElement("div");
-    footer.className = "message-footer";
-
-    const thought = document.createElement("span");
-    thought.className = "thought-time";
-    thought.textContent = `Thought for ${formatThoughtSeconds(thoughtSeconds)} seconds`;
-
-    const copyButton = document.createElement("button");
-    copyButton.className = "message-copy-button";
-    copyButton.type = "button";
-    copyButton.title = "Copy message";
-    copyButton.setAttribute("aria-label", "Copy message");
-
-    const copyIcon = document.createElement("img");
-    copyIcon.className = "ui-icon message-copy-icon";
-    copyIcon.src = COPY_ICON_PATH;
-    copyIcon.alt = "";
-    copyIcon.setAttribute("aria-hidden", "true");
-
-    copyButton.append(copyIcon);
-    copyButton.addEventListener("click", () => handleCopyMessage(copyButton, text));
-    footer.append(thought, copyButton);
-    bubble.append(footer);
+    appendLearnyFooter(bubble, text, thoughtSeconds);
+  } else {
+    appendUserFooter(bubble, text, messageIndex, node);
   }
 
   chatLog.append(node);
@@ -1462,10 +1692,12 @@ function displayMessage(
 
 function saveMessage(message) {
   const chat = ensureActiveChat();
-  chat.messages.push({
+  const savedMessage = {
     ...message,
     createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
-  });
+  };
+  chat.messages.push(savedMessage);
+  const messageIndex = chat.messages.length - 1;
   chat.updatedAt = Date.now();
 
   if (message.speaker === "You" && chat.title === "New chat") {
@@ -1474,14 +1706,15 @@ function saveMessage(message) {
 
   saveChats();
   renderChatList();
+  return messageIndex;
 }
 
 function addMessage(message, { persist = true, animateWords = false } = {}) {
-  const node = displayMessage(message, { animateWords });
   if (persist) {
-    saveMessage(message);
+    const messageIndex = saveMessage(message);
+    return displayMessage(message, { animateWords, messageIndex });
   }
-  return node;
+  return displayMessage(message, { animateWords });
 }
 
 function renderActiveChat() {
@@ -1492,7 +1725,7 @@ function renderActiveChat() {
     updateMessageSearch();
     return;
   }
-  chat.messages.forEach((message) => displayMessage(message));
+  chat.messages.forEach((message, index) => displayMessage(message, { messageIndex: index }));
   updateMessageSearch();
 }
 

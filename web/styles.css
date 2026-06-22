@@ -1509,6 +1509,7 @@ body.account-modal-open {
 }
 
 .bubble {
+  position: relative;
   max-width: min(680px, 76%);
   margin: 0;
   color: #f4f4f4;
@@ -1528,6 +1529,146 @@ body.account-modal-open {
   gap: 8px;
   margin-top: 8px;
   color: var(--subtle);
+}
+
+.message.user .message-footer {
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.message-text-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: rgba(236, 236, 236, 0.78);
+  background: rgba(255, 255, 255, 0.045);
+  font-size: 0.7rem;
+  font-weight: 650;
+  line-height: 1;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.message-text-action:hover,
+.message-text-action:focus-visible,
+.message-text-action.copied {
+  border-color: rgba(255, 255, 255, 0.2);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.message-action-icon {
+  width: 11px;
+  height: 11px;
+  object-fit: contain;
+  opacity: 0.9;
+  filter: brightness(0) invert(1);
+}
+
+.message-delete-button:hover,
+.message-delete-button:focus-visible {
+  border-color: rgba(255, 116, 116, 0.38);
+  color: #ffd9d9;
+  background: rgba(255, 84, 84, 0.12);
+}
+
+.message-edit-form {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  min-width: min(480px, 68vw);
+  padding: 4px;
+  border-radius: 18px;
+  isolation: isolate;
+  animation: editSurfaceIn 260ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.message-edit-form::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  z-index: -1;
+  border-radius: 20px;
+  background:
+    linear-gradient(120deg, rgba(115, 234, 255, 0.72), rgba(107, 105, 255, 0.4), rgba(255, 255, 255, 0.18)),
+    rgba(255, 255, 255, 0.04);
+  opacity: 0.62;
+  filter: blur(0.5px);
+  animation: editGlowDrift 2.8s ease-in-out infinite alternate;
+}
+
+.message-edit-input {
+  width: 100%;
+  min-height: 96px;
+  max-height: 260px;
+  resize: vertical;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 15px;
+  outline: 0;
+  color: #fff;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.095), rgba(255, 255, 255, 0.045)),
+    rgba(16, 17, 22, 0.94);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.1),
+    0 18px 44px rgba(0, 0, 0, 0.34);
+  font: inherit;
+  line-height: 1.45;
+}
+
+.message-edit-input:focus {
+  border-color: rgba(130, 235, 255, 0.58);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.12),
+    0 0 0 1px rgba(130, 235, 255, 0.16),
+    0 22px 52px rgba(0, 0, 0, 0.38);
+}
+
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.message-edit-actions button {
+  min-height: 31px;
+  padding: 0 13px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.message-edit-cancel {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(245, 245, 245, 0.82);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.message-edit-save {
+  border: 1px solid rgba(135, 234, 255, 0.38);
+  color: #fff;
+  background: linear-gradient(135deg, rgba(74, 153, 255, 0.9), rgba(108, 101, 255, 0.86));
+  box-shadow: 0 12px 26px rgba(58, 118, 255, 0.28);
+}
+
+.message-edit-actions button:hover,
+.message-edit-actions button:focus-visible {
+  transform: translateY(-1px);
 }
 
 .markdown-body {
@@ -1815,6 +1956,40 @@ body.account-modal-open {
   opacity: 0.38;
 }
 
+.message.is-deleting {
+  pointer-events: none;
+  animation: messageGlitchDelete 2000ms linear forwards;
+}
+
+.message.is-deleting .bubble {
+  overflow: hidden;
+  animation: bubbleGlitchDelete 2000ms steps(18, end) forwards;
+}
+
+.message.is-deleting .bubble::before,
+.message.is-deleting .bubble::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.message.is-deleting .bubble::before {
+  background: linear-gradient(90deg, transparent, rgba(104, 215, 255, 0.32), transparent);
+  mix-blend-mode: screen;
+  animation: glitchScanDelete 2000ms linear forwards;
+}
+
+.message.is-deleting .bubble::after {
+  border: 1px solid rgba(255, 88, 88, 0.32);
+  box-shadow:
+    -8px 0 rgba(78, 206, 255, 0.2),
+    8px 0 rgba(255, 80, 120, 0.18);
+  animation: glitchSplitDelete 2000ms steps(12, end) forwards;
+}
+
 .message.typing .bubble {
   display: inline-flex;
   gap: 5px;
@@ -1960,6 +2135,130 @@ body.account-modal-open {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes editSurfaceIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes editGlowDrift {
+  from {
+    opacity: 0.44;
+    transform: translate3d(-2px, 0, 0);
+  }
+  to {
+    opacity: 0.82;
+    transform: translate3d(2px, 0, 0);
+  }
+}
+
+@keyframes messageGlitchDelete {
+  0% {
+    opacity: 1;
+    filter: none;
+    transform: translate3d(0, 0, 0);
+  }
+  20% {
+    opacity: 1;
+    filter: contrast(1.1) saturate(1.2);
+    transform: translate3d(0, 0, 0);
+  }
+  42% {
+    opacity: 0.9;
+    filter: contrast(1.25) saturate(1.45);
+    transform: translate3d(-3px, 1px, 0);
+  }
+  58% {
+    opacity: 0.72;
+    transform: translate3d(4px, -1px, 0);
+  }
+  78% {
+    opacity: 0.34;
+    filter: blur(0.6px) contrast(1.5);
+    transform: translate3d(-1px, 4px, 0) scale(0.985);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(3px) contrast(1.7);
+    transform: translate3d(0, 16px, 0) scale(0.96);
+  }
+}
+
+@keyframes bubbleGlitchDelete {
+  0%, 18% {
+    clip-path: inset(0 0 0 0);
+  }
+  24% {
+    clip-path: inset(8% 0 12% 0);
+  }
+  28% {
+    clip-path: inset(0 0 0 0);
+  }
+  40% {
+    clip-path: inset(28% 0 34% 0);
+  }
+  46% {
+    clip-path: inset(0 0 0 0);
+  }
+  66% {
+    clip-path: inset(6% 0 48% 0);
+  }
+  74%, 100% {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes glitchScanDelete {
+  0%, 16% {
+    opacity: 0;
+    transform: translateX(-120%);
+  }
+  30% {
+    opacity: 0.72;
+    transform: translateX(70%);
+  }
+  44% {
+    opacity: 0;
+    transform: translateX(130%);
+  }
+  56% {
+    opacity: 0.46;
+    transform: translateX(-40%);
+  }
+  78%, 100% {
+    opacity: 0;
+    transform: translateX(120%);
+  }
+}
+
+@keyframes glitchSplitDelete {
+  0%, 22% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+  }
+  34% {
+    opacity: 0.86;
+    transform: translate3d(3px, -1px, 0);
+  }
+  50% {
+    opacity: 0.34;
+    transform: translate3d(-4px, 1px, 0);
+  }
+  70% {
+    opacity: 0.62;
+    transform: translate3d(2px, 0, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -2248,6 +2547,14 @@ body.account-modal-open {
 
   .bubble {
     max-width: 92%;
+  }
+
+  .message-edit-form {
+    min-width: min(330px, 78vw);
+  }
+
+  .message-text-action {
+    padding: 0 8px;
   }
 
   .account-modal {
