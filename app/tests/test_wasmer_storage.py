@@ -11,9 +11,12 @@ from learny.mysql_database import mysql_config_from_env
 from learny.storage import create_learny_database
 
 
+APP_ROOT = Path(__file__).resolve().parents[1]
+
+
 class WasmerStorageTests(unittest.TestCase):
     def test_app_yaml_requests_wasmer_mysql_database(self) -> None:
-        app_yaml = Path("app.yaml").read_text(encoding="utf-8")
+        app_yaml = (APP_ROOT / "app.yaml").read_text(encoding="utf-8")
 
         self.assertIn("capabilities:", app_yaml)
         self.assertIn("database:", app_yaml)

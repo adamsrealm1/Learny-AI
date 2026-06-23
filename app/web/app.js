@@ -61,12 +61,18 @@ const CHATS_KEY = "learny-chats";
 const ACTIVE_CHAT_KEY = "learny-active-chat-id";
 const SESSION_KEY = "learny-session-id";
 const RATE_LIMIT_SESSION_KEY = "learny-rate-limit-session-id";
-const COPY_ICON_PATH = "./icon_library/copy.png";
-const CHECK_ICON_PATH = "./icon_library/check.png";
-const EDIT_ICON_PATH = "./icon_library/edit.png";
-const DELETE_ICON_PATH = "./icon_library/delete.png";
-const X_ICON_PATH = "./icon_library/X.png";
-const PROFILE_ICON_PATH = "./icon_library/profile.png";
+const APP_SCRIPT_SOURCE =
+  document.currentScript?.getAttribute("src") ||
+  document.querySelector('script[src*="app.js"]')?.getAttribute("src") ||
+  "./web/app.js";
+const APP_SCRIPT_URL = new URL(APP_SCRIPT_SOURCE, window.location.href);
+const APP_ASSET_BASE_URL = new URL("../", APP_SCRIPT_URL);
+const COPY_ICON_PATH = appAssetPath("icon_library/copy.png");
+const CHECK_ICON_PATH = appAssetPath("icon_library/check.png");
+const EDIT_ICON_PATH = appAssetPath("icon_library/edit.png");
+const DELETE_ICON_PATH = appAssetPath("icon_library/delete.png");
+const X_ICON_PATH = appAssetPath("icon_library/X.png");
+const PROFILE_ICON_PATH = appAssetPath("icon_library/profile.png");
 const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const COPY_RESET_DELAY_MS = 10000;
@@ -106,6 +112,10 @@ const PROMPT_META_MARKERS = [
   "system prompt",
   "hidden instructions",
 ];
+
+function appAssetPath(path) {
+  return new URL(path.replace(/^\/+/, ""), APP_ASSET_BASE_URL).toString();
+}
 
 let chats = loadStoredChats();
 let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";

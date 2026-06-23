@@ -32,6 +32,7 @@ from .storage import create_learny_database
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+REPOSITORY_ROOT = PROJECT_ROOT.parent
 WASMER_ROOT = Path("/")
 WASMER_APP_DIR = WASMER_ROOT / "app"
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
@@ -599,6 +600,8 @@ def _default_static_dir() -> Path:
         return WASMER_ROOT
     if (WASMER_ROOT / "web" / "index.html").exists():
         return WASMER_ROOT / "web"
+    if (REPOSITORY_ROOT / "index.html").exists() and (REPOSITORY_ROOT / "app" / "web").is_dir():
+        return REPOSITORY_ROOT
     if (DEFAULT_STATIC_ROOT / "index.html").exists():
         return DEFAULT_STATIC_ROOT
     return DEFAULT_STATIC_DIR
@@ -620,7 +623,7 @@ def _safe_static_path(static_dir: Path, route: str) -> Path:
     if (
         _uses_root_static_layout(static_dir)
         and route not in PUBLIC_ROOT_FILES
-        and not route.startswith(("web/", "icon_library/"))
+        and not route.startswith(("web/", "icon_library/", "app/web/", "app/icon_library/"))
     ):
         raise ValueError("Static path is not part of the public web files.")
     candidate = (static_dir / route).resolve()
@@ -631,7 +634,9 @@ def _safe_static_path(static_dir: Path, route: str) -> Path:
 
 
 def _uses_root_static_layout(static_dir: Path) -> bool:
-    return (static_dir / "index.html").is_file() and (static_dir / "web").is_dir()
+    return (static_dir / "index.html").is_file() and (
+        (static_dir / "web").is_dir() or (static_dir / "app" / "web").is_dir()
+    )
 
 
 def _is_allowed_cors_origin(origin: str) -> bool:

@@ -112,7 +112,7 @@
         }
       }
     </style>
-    <link rel="stylesheet" href="./web/styles.css?v=msgfooter3">
+    <link rel="stylesheet" href="./app/web/styles.css?v=msgfooter3">
   </head>
   <body class="site-loading">
     <div class="loading-screen" id="loadingScreen" role="status" aria-label="Loading Learny AI">
@@ -174,14 +174,14 @@
         <header class="sidebar-header">
           <strong>Learny AI</strong>
           <button class="sidebar-toggle" type="button" title="Collapse sidebar">
-            <img class="ui-icon collapse-icon" src="./icon_library/collapse.png" alt="" aria-hidden="true">
+            <img class="ui-icon collapse-icon" src="./app/icon_library/collapse.png" alt="" aria-hidden="true">
             <span class="sr-only">Collapse sidebar</span>
           </button>
         </header>
 
         <button class="account-button" id="accountButton" type="button">
           <span class="account-orb" aria-hidden="true">
-            <img id="accountOrbImage" src="./icon_library/profile.png" alt="">
+            <img id="accountOrbImage" src="./app/icon_library/profile.png" alt="">
           </span>
           <span class="account-copy">
             <strong>Account</strong>
@@ -193,12 +193,12 @@
           <div class="panel-heading">
             <p>CHATS</p>
             <button class="add-chat-button" id="addChatButton" type="button" title="New chat">
-              <img class="ui-icon new-chat-icon" src="./icon_library/new.png" alt="" aria-hidden="true">
+              <img class="ui-icon new-chat-icon" src="./app/icon_library/new.png" alt="" aria-hidden="true">
               <span class="sr-only">New chat</span>
             </button>
           </div>
           <label class="chat-search" for="chatSearchInput">
-            <img class="ui-icon chat-search-icon" src="./icon_library/search.png" alt="" aria-hidden="true">
+            <img class="ui-icon chat-search-icon" src="./app/icon_library/search.png" alt="" aria-hidden="true">
             <input
               id="chatSearchInput"
               type="search"
@@ -227,11 +227,11 @@
       <main class="main-area">
         <header class="top-bar">
           <button class="mobile-sidebar-button" id="mobileSidebarButton" type="button" title="Open sidebar">
-            <img class="ui-icon mobile-sidebar-icon" src="./icon_library/collapse.png" alt="" aria-hidden="true">
+            <img class="ui-icon mobile-sidebar-icon" src="./app/icon_library/collapse.png" alt="" aria-hidden="true">
             <span class="sr-only">Open sidebar</span>
           </button>
           <label class="message-search" for="messageSearchInput">
-            <img class="ui-icon message-search-icon" src="./icon_library/search.png" alt="" aria-hidden="true">
+            <img class="ui-icon message-search-icon" src="./app/icon_library/search.png" alt="" aria-hidden="true">
             <input
               id="messageSearchInput"
               type="search"
@@ -266,7 +266,7 @@
                 required
               >
               <button class="send-button" id="sendButton" type="submit" title="Send message">
-                <img class="ui-icon send-icon" src="./icon_library/send.png" alt="" aria-hidden="true">
+                <img class="ui-icon send-icon" src="./app/icon_library/send.png" alt="" aria-hidden="true">
                 <span class="sr-only">Send message</span>
               </button>
             </form>
@@ -292,7 +292,7 @@
             <p id="accountModalSubtitle">Sync chats with your local Learny server.</p>
           </div>
           <button class="account-modal-close" id="accountModalClose" type="button" aria-label="Close account popup">
-            <img class="ui-icon x-icon" src="./icon_library/X.png" alt="" aria-hidden="true">
+            <img class="ui-icon x-icon" src="./app/icon_library/X.png" alt="" aria-hidden="true">
           </button>
         </header>
 
@@ -331,7 +331,7 @@
         <div class="account-modal-view" data-account-view="myaccount" hidden>
           <div class="account-profile-summary">
             <div class="account-avatar-large" id="accountAvatarLarge" aria-hidden="true">
-              <img id="accountAvatarImage" src="./icon_library/profile.png" alt="">
+              <img id="accountAvatarImage" src="./app/icon_library/profile.png" alt="">
             </div>
             <div>
               <p class="account-modal-kicker">Signed in as</p>
@@ -396,7 +396,7 @@
         aria-describedby="rateLimitDescription"
       >
         <button class="rate-limit-close" id="rateLimitClose" type="button" aria-label="Close rate limit popup">
-          <img class="ui-icon x-icon" src="./icon_library/X.png" alt="" aria-hidden="true">
+          <img class="ui-icon x-icon" src="./app/icon_library/X.png" alt="" aria-hidden="true">
         </button>
         <span class="rate-limit-warning-icon" aria-hidden="true"></span>
         <div class="rate-limit-dialog-copy">
@@ -427,7 +427,7 @@
       </article>
     </template>
 
-    <script src="./web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./web/app.js?v=msgfooter3" defer></script>
+    <script src="./app/web/markdown.js?v=ratelimit1" defer></script>
+    <script src="./app/web/app.js?v=msgfooter3" defer></script>
   </body>
 </html>
