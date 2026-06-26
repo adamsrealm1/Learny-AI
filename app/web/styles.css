@@ -189,12 +189,16 @@ input:focus-visible {
   animation: sidebarItemIn 420ms ease both;
 }
 
-.sidebar-header strong {
-  color: #f8f8ff;
-  font-size: 1.22rem;
-  font-weight: 750;
-  letter-spacing: 0;
-  text-shadow: 0 0 24px rgba(118, 126, 255, 0.28);
+.brand-logo {
+  display: block;
+  width: 134px;
+  height: 38px;
+  border-radius: 13px;
+  object-fit: cover;
+  object-position: center 58%;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.13),
+    0 12px 34px rgba(0, 0, 0, 0.28);
 }
 
 .account-button {
@@ -679,7 +683,6 @@ body.account-modal-open {
 
 .account-primary-action,
 .account-secondary-action,
-.account-admin-action,
 .account-danger-action,
 .account-link-button {
   min-height: 42px;
@@ -708,17 +711,10 @@ body.account-modal-open {
 }
 
 .account-secondary-action,
-.account-admin-action,
 .account-link-button {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.055);
   color: #f3f3f3;
-}
-
-.account-admin-action {
-  border-color: rgba(255, 174, 92, 0.34);
-  background: rgba(255, 144, 64, 0.1);
-  color: #ffd7ad;
 }
 
 .account-link-button {
@@ -731,20 +727,11 @@ body.account-modal-open {
 
 .account-secondary-action:hover,
 .account-secondary-action:focus-visible,
-.account-admin-action:hover,
-.account-admin-action:focus-visible,
 .account-link-button:hover,
 .account-link-button:focus-visible {
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.1);
   transform: translateY(-2px);
-}
-
-.account-admin-action:hover,
-.account-admin-action:focus-visible {
-  border-color: rgba(255, 184, 98, 0.5);
-  background: rgba(255, 144, 64, 0.16);
-  color: #fff;
 }
 
 .account-danger-action {
@@ -848,7 +835,6 @@ body.account-modal-open {
 
 .account-primary-action:disabled,
 .account-secondary-action:disabled,
-.account-admin-action:disabled,
 .account-danger-action:disabled,
 .account-modal-form input:disabled {
   cursor: not-allowed;
@@ -897,8 +883,8 @@ body.account-modal-open {
 }
 
 .sidebar-toggle {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.05);
@@ -946,9 +932,9 @@ body.account-modal-open {
   display: inline-grid;
   place-items: center;
   gap: 0;
-  width: 30px;
-  min-width: 30px;
-  height: 30px;
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 50%;
@@ -1032,7 +1018,7 @@ body.account-modal-open {
 
 .chat-search input {
   min-width: 0;
-  height: 30px;
+  height: 36px;
   border: 0;
   outline: 0;
   background: transparent;
@@ -1340,7 +1326,7 @@ body.account-modal-open {
 
 .message-search input {
   min-width: 0;
-  height: 30px;
+  height: 36px;
   border: 0;
   outline: 0;
   background: transparent;
@@ -1429,10 +1415,11 @@ body.account-modal-open {
   min-height: 0;
   max-height: 100%;
   margin: 0 auto;
-  padding: 42px 0 76px;
+  padding: 42px 0 96px;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  scroll-padding-bottom: 96px;
   scroll-behavior: smooth;
 }
 
@@ -1540,8 +1527,8 @@ body.account-modal-open {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 50%;
@@ -1568,10 +1555,10 @@ body.account-modal-open {
 }
 
 .message-action-icon {
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
   object-fit: contain;
-  opacity: 0.9;
+  opacity: 1;
   filter: brightness(0) invert(1);
 }
 
@@ -1890,8 +1877,8 @@ body.account-modal-open {
 }
 
 .message-copy-button {
-  width: 22px;
-  height: 22px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.055);
   opacity: 0.72;
@@ -1918,8 +1905,8 @@ body.account-modal-open {
 }
 
 .message-copy-icon {
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
 }
 
 .message.learny.word-revealing .message-footer {
@@ -2465,7 +2452,7 @@ body.account-modal-open {
     display: none;
   }
 
-  .app-shell.sidebar-collapsed .sidebar-header strong,
+  .app-shell.sidebar-collapsed .brand-logo,
   .app-shell.sidebar-collapsed .account-button,
   .app-shell.sidebar-collapsed .chats-panel,
   .app-shell.sidebar-collapsed .rate-limit-panel {
@@ -2528,7 +2515,10 @@ body.account-modal-open {
     display: grid;
     width: min(312px, 88vw);
     transform: translateX(calc(-100% - 18px));
-    transition: transform 300ms cubic-bezier(0.2, 0.9, 0.2, 1);
+    visibility: hidden;
+    transition:
+      transform 300ms cubic-bezier(0.2, 0.9, 0.2, 1),
+      visibility 0s linear 300ms;
     box-shadow:
       24px 0 70px rgba(0, 0, 0, 0.52),
       inset -1px 0 rgba(255, 255, 255, 0.1),
@@ -2537,6 +2527,10 @@ body.account-modal-open {
 
   .app-shell.sidebar-open .sidebar {
     transform: translateX(0);
+    visibility: visible;
+    transition:
+      transform 300ms cubic-bezier(0.2, 0.9, 0.2, 1),
+      visibility 0s linear 0s;
   }
 
   .sidebar-scrim {
@@ -2558,8 +2552,8 @@ body.account-modal-open {
   .mobile-sidebar-button {
     display: inline-grid;
     flex: 0 0 auto;
-    width: 34px;
-    height: 34px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.07);
     box-shadow:
@@ -2614,7 +2608,7 @@ body.account-modal-open {
 
 @media (max-width: 560px) {
   .main-area {
-    grid-template-rows: 42px minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr);
   }
 
   .empty-state {
@@ -2632,6 +2626,7 @@ body.account-modal-open {
 
   .composer {
     grid-template-columns: minmax(0, 1fr) 32px;
+    min-height: 58px;
   }
 
   .bubble {
@@ -2643,7 +2638,51 @@ body.account-modal-open {
   }
 
   .message-text-action {
-    padding: 0 8px;
+    width: 34px;
+    height: 34px;
+  }
+
+  .message-copy-button {
+    width: 34px;
+    height: 34px;
+  }
+
+  .top-bar {
+    gap: 8px;
+    padding: 0 10px;
+  }
+
+  .message-search {
+    min-height: 40px;
+    padding: 0 11px;
+  }
+
+  .message-search input {
+    height: 36px;
+  }
+
+  .connection-pill {
+    min-height: 40px;
+  }
+
+  .sidebar {
+    width: min(330px, 92vw);
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+
+  .sidebar-toggle,
+  .add-chat-button {
+    width: 42px;
+    height: 42px;
+  }
+
+  .chat-search {
+    min-height: 44px;
+  }
+
+  .chat-search input {
+    height: 38px;
   }
 
   .account-modal {
