@@ -41,6 +41,7 @@ DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 ACCOUNT_SESSION_COOKIE = "learny_account"
 PUBLIC_ROOT_FILES = {
     "index.html",
+    "Learny.png",
 }
 ALLOWED_CORS_ORIGINS = {
     "https://learny.env.pm",
@@ -623,7 +624,6 @@ def _safe_static_path(static_dir: Path, route: str) -> Path:
     if (
         _uses_root_static_layout(static_dir)
         and route not in PUBLIC_ROOT_FILES
-        and route != "app/learny.png"
         and not route.startswith(("web/", "icon_library/", "app/web/", "app/icon_library/"))
     ):
         raise ValueError("Static path is not part of the public web files.")
