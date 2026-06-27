@@ -4,10 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Learny AI - One Smart AI</title>
-    <link rel="icon" type="image/png" href="./Learny.png">
-    <link rel="apple-touch-icon" href="./Learny.png">
+    <link rel="icon" type="image/png" href="./logos/Learny.png">
+    <link rel="apple-touch-icon" href="./logos/Learny.png">
     <meta name="application-name" content="Learny AI">
-    <meta property="og:image" content="./Learny.png">
+    <meta property="og:image" content="./logos/Learny.png">
     <style>
       html,
       body {
@@ -137,7 +137,7 @@
   </head>
   <body class="site-loading">
     <div class="loading-screen" id="loadingScreen" role="status" aria-label="Loading Learny AI">
-      <img class="loading-logo" src="./Learny_NOBG.png" alt="Learny AI">
+      <img class="loading-logo" src="./logos/Learny_NOBG.png" alt="Learny AI">
       <div class="spinner"></div>
       <button class="loading-skip" id="loadingSkipButton" type="button">Skip</button>
     </div>
@@ -191,7 +191,7 @@
       <aside class="sidebar" id="sidebar" aria-label="Learny navigation">
         <header class="sidebar-header">
           <div class="brand-lockup">
-            <img class="brand-logo" src="./Learny_NOBG.png" alt="Learny AI">
+            <img class="brand-logo" src="./logos/Learny_NOBG.png" alt="Learny AI">
             <span class="brand-name">ʟᴇᴀʀɴʏ ᴀɪ</span>
           </div>
           <button class="sidebar-toggle" type="button" title="Collapse sidebar">
@@ -272,7 +272,18 @@
           </div>
 
           <div class="composer-zone">
+            <div class="attachment-tray" id="attachmentTray" hidden></div>
             <form class="composer" id="chatForm">
+              <button class="attach-button" id="attachButton" type="button" title="Attach file">
+                <img class="ui-icon attach-icon" src="./app/icon_library/new.png" alt="" aria-hidden="true">
+                <span class="sr-only">Attach file</span>
+              </button>
+              <input
+                class="file-input"
+                id="fileInput"
+                type="file"
+                accept=".txt,.md,.log,.docx,.rtf,.pdf,.csv,.json,.xml,text/plain,text/markdown,text/csv,application/json,application/xml,text/xml,application/pdf,application/rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              >
               <input
                 id="messageInput"
                 name="message"

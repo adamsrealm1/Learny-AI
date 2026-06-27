@@ -4,7 +4,9 @@ import json
 import threading
 import unittest
 import urllib.request
+import zipfile
 from http.server import ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -22,7 +24,12 @@ from learny.groq_client import (
     GroqAnswerGenerator,
     parse_generated_answer,
 )
-from learny.web_server import WebServerConfig, create_handler
+from learny.web_server import (
+    UploadedAttachment,
+    WebServerConfig,
+    _extract_attachment_context,
+    create_handler,
+)
 
 
 EXPECTED_MODELS = (
@@ -79,6 +86,19 @@ class CapturingTransport:
     def send_chat_completion(self, payload: dict[str, Any], timeout: float) -> str:
         self.payload = payload
         return "Hello from Groq."
+
+
+class CapturingAnswerGenerator:
+    def __init__(self) -> None:
+        self.questions: list[str] = []
+
+    def generate(
+        self,
+        question: str,
+        history: ConversationHistory,
+    ) -> GeneratedAnswer:
+        self.questions.append(question)
+        return GeneratedAnswer(answer="I read the attachment.", model=PRIMARY_GROQ_MODEL)
 
 
 class LearnyGroqOnlyTests(unittest.TestCase):
@@ -200,6 +220,80 @@ class LearnyGroqOnlyTests(unittest.TestCase):
         self.assertEqual(data["source"], "unknown")
         self.assertTrue(data["retryable"])
 
+    def test_multipart_attachment_context_is_sent_to_generator(self) -> None:
+        generator = CapturingAnswerGenerator()
+        with run_test_server(lambda: generator) as base_url:
+            data = post_multipart(
+                base_url,
+                "/api/ask",
+                fields={"message": "Summarize this file", "sessionId": "session-test"},
+                filename="notes.md",
+                content_type="text/markdown",
+                content=b"# Notes\nLearny should see this text.",
+            )
+
+        self.assertEqual(data["answer"], "I read the attachment.")
+        self.assertEqual(len(generator.questions), 1)
+        self.assertIn("Summarize this file", generator.questions[0])
+        self.assertIn("Name: notes.md", generator.questions[0])
+        self.assertIn("Extension: .md", generator.questions[0])
+        self.assertIn("Learny should see this text.", generator.questions[0])
+
+    def test_attachment_extractors_cover_supported_document_formats(self) -> None:
+        docx_buffer = BytesIO()
+        with zipfile.ZipFile(docx_buffer, "w") as archive:
+            archive.writestr(
+                "word/document.xml",
+                (
+                    '<?xml version="1.0" encoding="UTF-8"?>'
+                    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                    "<w:body><w:p><w:r><w:t>Hello from DOCX</w:t></w:r></w:p></w:body>"
+                    "</w:document>"
+                ),
+            )
+
+        samples = [
+            ("plain.txt", b"Hello from TXT", "Hello from TXT"),
+            ("notes.log", b"Hello from LOG", "Hello from LOG"),
+            ("data.csv", b"name,value\nLearny,1", "Learny,1"),
+            ("data.json", b'{"message":"Hello from JSON"}', "Hello from JSON"),
+            ("data.xml", b"<root>Hello from XML</root>", "Hello from XML"),
+            ("note.rtf", b"{\\rtf1\\ansi Hello from RTF\\par}", "Hello from RTF"),
+            ("document.docx", docx_buffer.getvalue(), "Hello from DOCX"),
+            (
+                "document.pdf",
+                b"%PDF-1.4\n1 0 obj\n<<>>\nstream\nBT (Hello from PDF) Tj ET\nendstream\nendobj",
+                "Hello from PDF",
+            ),
+        ]
+
+        for filename, content, expected in samples:
+            with self.subTest(filename=filename):
+                context = _extract_attachment_context(
+                    UploadedAttachment(
+                        field_name="attachment",
+                        filename=filename,
+                        content_type="application/octet-stream",
+                        data=content,
+                    )
+                )
+                self.assertIn(expected, context.text)
+
+    def test_unsupported_attachment_type_is_rejected(self) -> None:
+        with run_test_server(StaticAnswerGenerator) as base_url:
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                post_multipart(
+                    base_url,
+                    "/api/ask",
+                    fields={"message": "Read this", "sessionId": "session-test"},
+                    filename="image.png",
+                    content_type="image/png",
+                    content=b"not text",
+                )
+
+        self.assertEqual(raised.exception.code, 400)
+        raised.exception.close()
+
 
 class run_test_server:
     def __init__(self, generator_factory: Any) -> None:
@@ -242,6 +336,50 @@ def post_json(base_url: str, path: str, payload: dict[str, Any]) -> dict[str, An
         f"{base_url}{path}",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def post_multipart(
+    base_url: str,
+    path: str,
+    *,
+    fields: dict[str, str],
+    filename: str,
+    content_type: str,
+    content: bytes,
+) -> dict[str, Any]:
+    boundary = "----LearnyTestBoundary"
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+                value.encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    chunks.extend(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            (
+                'Content-Disposition: form-data; name="attachment"; '
+                f'filename="{filename}"\r\n'
+            ).encode("utf-8"),
+            f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+            content,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    body = b"".join(chunks)
+    request = urllib.request.Request(
+        f"{base_url}{path}",
+        data=body,
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=10) as response:

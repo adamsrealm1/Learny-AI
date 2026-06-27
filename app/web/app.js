@@ -2,6 +2,9 @@ const chatLog = document.querySelector("#chatLog");
 const chatForm = document.querySelector("#chatForm");
 const messageInput = document.querySelector("#messageInput");
 const sendButton = document.querySelector("#sendButton");
+const attachButton = document.querySelector("#attachButton");
+const fileInput = document.querySelector("#fileInput");
+const attachmentTray = document.querySelector("#attachmentTray");
 const messageTemplate = document.querySelector("#messageTemplate");
 const chatList = document.querySelector("#chatList");
 const addChatButton = document.querySelector("#addChatButton");
@@ -72,6 +75,8 @@ const X_ICON_PATH = appAssetPath("icon_library/X.png");
 const PROFILE_ICON_PATH = appAssetPath("icon_library/profile.png");
 const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+const ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024;
+const ATTACHMENT_EXTENSIONS = new Set(["txt", "md", "log", "docx", "rtf", "pdf", "csv", "json", "xml"]);
 const COPY_RESET_DELAY_MS = 10000;
 const MESSAGE_DELETE_DURATION_MS = 850;
 const WORD_REVEAL_STEP_MS = 52;
@@ -113,6 +118,63 @@ function appAssetPath(path) {
   return new URL(path.replace(/^\/+/, ""), APP_ASSET_BASE_URL).toString();
 }
 
+function attachmentExtensionFromName(name) {
+  const cleanName = String(name || "").trim();
+  const dotIndex = cleanName.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === cleanName.length - 1) {
+    return "";
+  }
+  return cleanName.slice(dotIndex + 1).toLowerCase();
+}
+
+function formatFileSize(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) {
+    return "0 KB";
+  }
+  if (size < 1024 * 1024) {
+    return `${Math.max(1, Math.round(size / 1024))} KB`;
+  }
+  return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function normalizeAttachmentMeta(attachment) {
+  if (!attachment || typeof attachment !== "object") {
+    return null;
+  }
+  const name = typeof attachment.name === "string" ? attachment.name.trim() : "";
+  if (!name) {
+    return null;
+  }
+  const extension = attachmentExtensionFromName(name);
+  if (!ATTACHMENT_EXTENSIONS.has(extension)) {
+    return null;
+  }
+  const size = Number.isFinite(attachment.size) ? Math.max(0, Math.floor(attachment.size)) : 0;
+  return {
+    name,
+    extension,
+    size,
+    type: typeof attachment.type === "string" ? attachment.type.trim() : "",
+  };
+}
+
+function attachmentMetaFromFile(file) {
+  if (!file) {
+    return null;
+  }
+  return normalizeAttachmentMeta({
+    name: file.name,
+    size: file.size,
+    type: file.type,
+  });
+}
+
+function isAllowedAttachmentFile(file) {
+  const meta = attachmentMetaFromFile(file);
+  return Boolean(meta && file.size <= ATTACHMENT_MAX_BYTES);
+}
+
 let chats = loadStoredChats();
 let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
 let sessionId = "";
@@ -133,6 +195,7 @@ let rateLimitPopupTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
 let activeAccountView = "";
+let selectedAttachment = null;
 const mobileSidebarMedia = window.matchMedia
   ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
   : null;
@@ -548,6 +611,82 @@ function startWelcomeHeadingCycle() {
   }, WELCOME_LOCK_DELAY_MS);
 }
 
+function clearSelectedAttachment() {
+  selectedAttachment = null;
+  if (fileInput) {
+    fileInput.value = "";
+  }
+  renderAttachmentTray();
+}
+
+function setSelectedAttachment(file) {
+  if (!isAllowedAttachmentFile(file)) {
+    clearSelectedAttachment();
+    return;
+  }
+  selectedAttachment = {
+    file,
+    meta: attachmentMetaFromFile(file),
+  };
+  renderAttachmentTray();
+}
+
+function renderAttachmentTray() {
+  if (!attachmentTray) {
+    return;
+  }
+
+  const composer = chatForm;
+  if (composer) {
+    composer.classList.toggle("has-attachment", Boolean(selectedAttachment));
+  }
+
+  attachmentTray.replaceChildren();
+  if (!selectedAttachment || !selectedAttachment.meta) {
+    attachmentTray.hidden = true;
+    return;
+  }
+
+  const { name, extension, size } = selectedAttachment.meta;
+  const card = document.createElement("div");
+  card.className = "attachment-card";
+
+  const icon = document.createElement("span");
+  icon.className = "attachment-file-icon";
+  icon.textContent = extension || "file";
+
+  const info = document.createElement("span");
+  info.className = "attachment-info";
+
+  const filename = document.createElement("strong");
+  filename.className = "attachment-name";
+  filename.textContent = name;
+
+  const meta = document.createElement("small");
+  meta.className = "attachment-meta";
+  meta.textContent = `${extension.toUpperCase()} document - ${formatFileSize(size)}`;
+
+  info.append(filename, meta);
+
+  const removeButton = document.createElement("button");
+  removeButton.className = "attachment-remove";
+  removeButton.type = "button";
+  removeButton.title = "Remove attachment";
+  removeButton.setAttribute("aria-label", "Remove attachment");
+
+  const removeIcon = document.createElement("img");
+  removeIcon.className = "ui-icon x-icon";
+  removeIcon.src = X_ICON_PATH;
+  removeIcon.alt = "";
+  removeIcon.setAttribute("aria-hidden", "true");
+  removeButton.append(removeIcon);
+  removeButton.addEventListener("click", clearSelectedAttachment);
+
+  card.append(icon, info, removeButton);
+  attachmentTray.append(card);
+  attachmentTray.hidden = false;
+}
+
 function isMobileSidebarLayout() {
   return Boolean(mobileSidebarMedia && mobileSidebarMedia.matches);
 }
@@ -637,6 +776,7 @@ function loadStoredChats() {
                 speaker: message.speaker,
                 text: sanitizeStoredMessageText(message),
                 source: sanitizeStoredMessageSource(message),
+                attachment: normalizeAttachmentMeta(message.attachment),
                 thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
                 createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
               }))
@@ -743,12 +883,18 @@ function syncComposerAvailability() {
   if (DIRECT_FILE_MODE) {
     sendButton.disabled = true;
     messageInput.disabled = true;
+    if (attachButton) {
+      attachButton.disabled = true;
+    }
     return;
   }
 
   if (!isSending) {
     sendButton.disabled = false;
     messageInput.disabled = false;
+    if (attachButton) {
+      attachButton.disabled = false;
+    }
   }
 }
 
@@ -1140,6 +1286,7 @@ function normalizeServerChats(serverChats) {
               speaker: message.speaker,
               text: sanitizeStoredMessageText(message),
               source: sanitizeStoredMessageSource(message),
+              attachment: normalizeAttachmentMeta(message.attachment),
               thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
               createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
             }))
@@ -1261,6 +1408,10 @@ function chatMatchesSearch(chat, query) {
   const searchableText = [
     chat.title,
     ...chat.messages.map((message) => message.text),
+    ...chat.messages
+      .map((message) => normalizeAttachmentMeta(message.attachment))
+      .filter(Boolean)
+      .map((attachment) => attachment.name),
   ]
     .join(" ")
     .toLowerCase();
@@ -1664,8 +1815,37 @@ function appendUserFooter(bubble, text, messageIndex, node) {
   bubble.append(footer);
 }
 
+function createMessageAttachment(attachment) {
+  const meta = normalizeAttachmentMeta(attachment);
+  if (!meta) {
+    return null;
+  }
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "message-attachment";
+
+  const icon = document.createElement("span");
+  icon.className = "message-attachment-icon";
+  icon.textContent = meta.extension || "file";
+
+  const copy = document.createElement("span");
+  copy.className = "message-attachment-copy";
+
+  const name = document.createElement("strong");
+  name.className = "message-attachment-name";
+  name.textContent = meta.name;
+
+  const detail = document.createElement("small");
+  detail.className = "message-attachment-meta";
+  detail.textContent = `${meta.extension.toUpperCase()} - ${formatFileSize(meta.size)}`;
+
+  copy.append(name, detail);
+  wrapper.append(icon, copy);
+  return wrapper;
+}
+
 function displayMessage(
-  { speaker, text, source = "", thoughtSeconds = null },
+  { speaker, text, source = "", thoughtSeconds = null, attachment = null },
   {
     animateWords: shouldAnimateWords = false,
     messageIndex = null,
@@ -1679,7 +1859,8 @@ function displayMessage(
   if (Number.isInteger(messageIndex)) {
     node.dataset.messageIndex = String(messageIndex);
   }
-  node.dataset.searchText = `${speaker} ${source} ${text}`.toLowerCase();
+  const attachmentMeta = normalizeAttachmentMeta(attachment);
+  node.dataset.searchText = `${speaker} ${source} ${text} ${attachmentMeta ? attachmentMeta.name : ""}`.toLowerCase();
   node.querySelector(".speaker").textContent = speaker;
   node.querySelector(".source").textContent = source === "error" ? "" : source;
   const bubble = node.querySelector(".bubble");
@@ -1698,7 +1879,11 @@ function displayMessage(
       node.classList.add("reveal-complete");
     }, revealDuration + WORD_REVEAL_FOOTER_DELAY_MS);
   }
+  const attachmentNode = speaker === "You" ? createMessageAttachment(attachmentMeta) : null;
   bubble.replaceChildren(textNode);
+  if (attachmentNode) {
+    bubble.append(attachmentNode);
+  }
 
   if (speaker === "Learny") {
     appendLearnyFooter(bubble, text, thoughtSeconds);
@@ -1837,6 +2022,9 @@ function resetChat() {
     );
     messageInput.disabled = true;
     sendButton.disabled = true;
+    if (attachButton) {
+      attachButton.disabled = true;
+    }
     return;
   }
 
@@ -1844,6 +2032,10 @@ function resetChat() {
   messageInput.value = "";
   messageInput.disabled = false;
   sendButton.disabled = false;
+  if (attachButton) {
+    attachButton.disabled = false;
+  }
+  clearSelectedAttachment();
 }
 
 function addTyping() {
@@ -1937,7 +2129,9 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
 
     try {
       const requestHeaders = { ...headers };
-      if (fetchOptions.body !== undefined && !("Content-Type" in requestHeaders)) {
+      const hasFormDataBody =
+        typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+      if (fetchOptions.body !== undefined && !hasFormDataBody && !("Content-Type" in requestHeaders)) {
         requestHeaders["Content-Type"] = "application/json";
       }
       if (sessionId && !("X-Learny-Session" in requestHeaders)) {
@@ -2012,7 +2206,20 @@ async function loadRateLimit() {
   }
 }
 
-async function askLearny(message, { addUserMessage = true } = {}) {
+function createAskRequestBody(message, chat, attachment) {
+  if (attachment && attachment.file) {
+    const formData = new FormData();
+    formData.append("message", message);
+    formData.append("sessionId", sessionId);
+    formData.append("chatId", chat.id);
+    formData.append("attachment", attachment.file, attachment.file.name);
+    return formData;
+  }
+
+  return JSON.stringify({ message, sessionId, chatId: chat.id });
+}
+
+async function askLearny(message, { addUserMessage = true, attachment = null } = {}) {
   if (DIRECT_FILE_MODE) {
     return;
   }
@@ -2026,7 +2233,12 @@ async function askLearny(message, { addUserMessage = true } = {}) {
   const chat = ensureActiveChat();
   sessionId = chat.sessionId;
   if (addUserMessage) {
-    addMessage({ speaker: "You", text: message, source: "sent" });
+    addMessage({
+      speaker: "You",
+      text: message,
+      source: "sent",
+      attachment: attachment ? attachment.meta : null,
+    });
   }
 
   const typing = addTyping();
@@ -2034,6 +2246,9 @@ async function askLearny(message, { addUserMessage = true } = {}) {
   isSending = true;
   sendButton.disabled = true;
   messageInput.disabled = true;
+  if (attachButton) {
+    attachButton.disabled = true;
+  }
 
   let attempt = 0;
   let completed = false;
@@ -2044,7 +2259,7 @@ async function askLearny(message, { addUserMessage = true } = {}) {
           "/api/ask",
           {
             method: "POST",
-            body: JSON.stringify({ message, sessionId, chatId: chat.id }),
+            body: createAskRequestBody(message, chat, attachment),
             timeoutMs: ASK_REQUEST_TIMEOUT_MS,
           },
           activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
@@ -2087,6 +2302,18 @@ async function askLearny(message, { addUserMessage = true } = {}) {
           }
           updateRateLimit(error.data.rateLimit);
           openRateLimitPopup({ force: true });
+          completed = true;
+          continue;
+        }
+
+        if (error && error.retryable === false) {
+          typing.remove();
+          addMessage({
+            speaker: "Learny",
+            text: GENERIC_ERROR_MESSAGE,
+            source: "error",
+            thoughtSeconds: (performance.now() - thoughtStartedAt) / 1000,
+          });
           completed = true;
           continue;
         }
@@ -2296,6 +2523,7 @@ chatForm.addEventListener("submit", (event) => {
 
   const message = messageInput.value.trim();
   if (!message) {
+    messageInput.focus();
     return;
   }
   if (isRateLimited()) {
@@ -2303,9 +2531,30 @@ chatForm.addEventListener("submit", (event) => {
     openRateLimitPopup();
     return;
   }
+  const attachment = selectedAttachment;
   messageInput.value = "";
-  askLearny(message);
+  clearSelectedAttachment();
+  askLearny(message, { attachment });
 });
+
+if (attachButton && fileInput) {
+  attachButton.addEventListener("click", () => {
+    if (isSending || DIRECT_FILE_MODE) {
+      return;
+    }
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) {
+      clearSelectedAttachment();
+      return;
+    }
+    setSelectedAttachment(file);
+    messageInput.focus();
+  });
+}
 
 if (addChatButton) {
   addChatButton.addEventListener("click", resetChat);
