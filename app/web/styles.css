@@ -773,7 +773,7 @@ body.account-modal-open {
 
 .captcha-slot {
   --captcha-crop: 3px;
-  --captcha-scale: 1.032;
+  --captcha-scale: 1.055;
   position: relative;
   display: flex;
   width: 304px;
@@ -2122,10 +2122,17 @@ body.account-modal-open {
 
 .admin-action-card {
   display: grid;
+  align-content: start;
   gap: 10px;
   min-width: 0;
   padding: 14px;
   border-radius: 16px;
+}
+
+.admin-action-card button {
+  align-self: end;
+  min-height: 38px;
+  height: 38px;
 }
 
 .admin-action-card h3 {
