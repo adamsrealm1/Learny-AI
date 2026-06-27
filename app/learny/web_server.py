@@ -40,6 +40,7 @@ from .storage import create_learny_database
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 REPOSITORY_ROOT = PROJECT_ROOT.parent
 WASMER_ROOT = Path("/")
+WASMER_SITE_DIR = WASMER_ROOT / "site"
 WASMER_APP_DIR = WASMER_ROOT / "app"
 DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
 DEFAULT_STATIC_ROOT = PROJECT_ROOT
@@ -668,6 +669,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _default_static_dir() -> Path:
+    if (WASMER_SITE_DIR / "index.html").exists():
+        return WASMER_SITE_DIR
     if (WASMER_APP_DIR / "index.html").exists():
         return WASMER_APP_DIR
     if (WASMER_ROOT / "index.html").exists():

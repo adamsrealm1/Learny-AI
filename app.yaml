@@ -1,0 +1,15 @@
+name: learny-ai
+app_id: da_K1EIZtMUJ8b7
+owner: adamsrealm1
+package: .
+env:
+  PYTHONEXECUTABLE: /bin/python
+cli_args:
+- /src/main.py
+capabilities:
+  database:
+    engine: mysql
+  locality:
+    regions:
+    - us-socal1
+kind: wasmer.io/App.v0
