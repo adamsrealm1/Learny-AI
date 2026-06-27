@@ -774,9 +774,9 @@ body.account-modal-open {
 .captcha-slot {
   position: relative;
   display: flex;
-  width: 324px;
+  width: 340px;
   max-width: 100%;
-  min-height: 88px;
+  min-height: 92px;
   align-items: center;
   justify-content: center;
   padding: 0;
