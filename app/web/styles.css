@@ -91,11 +91,7 @@ input:focus-visible {
   overflow: hidden;
   background: var(--bg);
   isolation: isolate;
-  transition:
-    grid-template-columns 260ms cubic-bezier(0.2, 0.9, 0.2, 1),
-    filter 620ms cubic-bezier(0.2, 0.9, 0.2, 1),
-    opacity 620ms cubic-bezier(0.2, 0.9, 0.2, 1),
-    transform 620ms cubic-bezier(0.2, 0.9, 0.2, 1);
+  transition: grid-template-columns 260ms cubic-bezier(0.2, 0.9, 0.2, 1);
 }
 
 .star-field {
@@ -186,7 +182,6 @@ input:focus-visible {
   justify-content: space-between;
   min-height: 48px;
   padding: 0 2px 2px;
-  animation: sidebarItemIn 420ms ease both;
 }
 
 .brand-lockup {
@@ -236,7 +231,6 @@ input:focus-visible {
     0 14px 34px rgba(0, 0, 0, 0.2);
   overflow: hidden;
   text-decoration: none;
-  animation: sidebarItemIn 460ms 60ms ease both;
   transition:
     border-color 180ms ease,
     background 180ms ease,
@@ -1037,7 +1031,6 @@ body.account-modal-open {
   gap: 10px;
   min-height: 0;
   margin-top: 8px;
-  animation: sidebarItemIn 500ms 100ms ease both;
 }
 
 .panel-heading {
@@ -1118,7 +1111,6 @@ body.account-modal-open {
     background 160ms ease,
     box-shadow 160ms ease,
     transform 160ms ease;
-  animation: sidebarItemIn 540ms 140ms ease both;
 }
 
 .chat-search:focus-within {
@@ -1196,7 +1188,6 @@ body.account-modal-open {
   background: #151519;
   box-shadow: none;
   overflow: hidden;
-  animation: sidebarItemIn 560ms 170ms ease both;
   transition:
     border-color 180ms ease,
     background 180ms ease,
@@ -1285,7 +1276,6 @@ body.account-modal-open {
     background 170ms ease,
     box-shadow 170ms ease,
     transform 170ms cubic-bezier(0.2, 0.9, 0.2, 1);
-  animation: chatItemIn 360ms ease both;
 }
 
 .chat-item::before {
@@ -1511,16 +1501,13 @@ body.account-modal-open {
   top: 40%;
   display: grid;
   width: min(680px, 100%);
-  opacity: 0;
+  opacity: 1;
   transform: translate(-50%, -50%);
   place-items: center;
   pointer-events: none;
-  animation: welcomeFadeIn 60ms ease 60ms both;
-  transition: opacity 200ms ease;
 }
 
 .empty-state.hidden {
-  animation: none;
   opacity: 0;
 }
 
@@ -1533,19 +1520,11 @@ body.account-modal-open {
   opacity: 1;
   text-align: center;
   transform: translateY(0);
-  transition: opacity 260ms ease, transform 260ms ease;
-  will-change: opacity, transform;
-}
-
-.empty-state h1.is-changing {
-  opacity: 0;
-  transform: translateY(7px);
 }
 
 .welcome-word {
   display: inline-block;
-  opacity: 0;
-  animation: welcomeWordIn 460ms ease forwards;
+  opacity: 1;
 }
 
 .message {
@@ -2385,28 +2364,6 @@ body.account-modal-open {
   }
 }
 
-@keyframes sidebarItemIn {
-  from {
-    opacity: 0;
-    transform: translateX(-10px) scale(0.985);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
-}
-
-@keyframes chatItemIn {
-  from {
-    opacity: 0;
-    transform: translateX(-8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
 @keyframes typingDot {
   0%,
   100% {
@@ -2660,26 +2617,6 @@ body.account-modal-open {
   to {
     opacity: 1;
     transform: translateY(0);
-  }
-}
-
-@keyframes welcomeFadeIn {
-  from {
-    opacity: 0;
-    transform: translate(-50%, calc(-50% + 6px));
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, -50%);
-  }
-}
-
-@keyframes welcomeWordIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
   }
 }
 

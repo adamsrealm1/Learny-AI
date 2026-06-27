@@ -88,7 +88,6 @@ const WORD_REVEAL_DURATION_MS = 300;
 const WORD_REVEAL_FOOTER_DELAY_MS = 850;
 const WELCOME_TEXTS = ["Hey! I'm Learny!", "What's on your mind?"];
 const WELCOME_LOCK_DELAY_MS = 2200;
-const WELCOME_SWAP_FADE_MS = 1000;
 const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_FETCH_TIMEOUT_MS = 8000;
@@ -617,13 +616,9 @@ function startWelcomeHeadingCycle() {
   }
 
   welcomeTimeoutId = window.setTimeout(() => {
-    welcomeHeading.classList.add("is-changing");
-    window.setTimeout(() => {
-      welcomeTextIndex = 1;
-      renderWelcomeHeadingText(WELCOME_TEXTS[welcomeTextIndex]);
-      welcomeHeading.classList.remove("is-changing");
-      welcomeTimeoutId = null;
-    }, WELCOME_SWAP_FADE_MS);
+    welcomeTextIndex = 1;
+    renderWelcomeHeadingText(WELCOME_TEXTS[welcomeTextIndex]);
+    welcomeTimeoutId = null;
   }, WELCOME_LOCK_DELAY_MS);
 }
 
