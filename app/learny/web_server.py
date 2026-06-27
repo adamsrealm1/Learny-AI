@@ -479,6 +479,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     chat_id,
                     speaker="You",
                     text=message,
+                    history_text=groq_message,
                     source="sent",
                 )
                 database.append_message(

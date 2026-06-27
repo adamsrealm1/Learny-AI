@@ -92,6 +92,7 @@ class LearnyDatabase:
                     chat_id TEXT NOT NULL,
                     speaker TEXT NOT NULL,
                     text TEXT NOT NULL,
+                    history_text TEXT NOT NULL DEFAULT '',
                     source TEXT NOT NULL DEFAULT '',
                     thought_seconds REAL,
                     created_at INTEGER NOT NULL,
@@ -123,6 +124,7 @@ class LearnyDatabase:
                 """
             )
             self._ensure_profile_picture_column(connection)
+            self._ensure_message_history_column(connection)
 
     def _ensure_profile_picture_column(self, connection: sqlite3.Connection) -> None:
         columns = {
@@ -131,6 +133,14 @@ class LearnyDatabase:
         }
         if "profile_picture" not in columns:
             connection.execute("ALTER TABLE accounts ADD COLUMN profile_picture TEXT")
+
+    def _ensure_message_history_column(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(messages)").fetchall()
+        }
+        if "history_text" not in columns:
+            connection.execute("ALTER TABLE messages ADD COLUMN history_text TEXT NOT NULL DEFAULT ''")
 
     def create_account(self, username: str, password: str) -> dict[str, Any]:
         username = _clean_username(username)
@@ -418,14 +428,25 @@ class LearnyDatabase:
                         chat["updatedAt"],
                     ),
                 )
+                existing_messages = connection.execute(
+                    """
+                    SELECT speaker, text, history_text
+                    FROM messages
+                    WHERE account_id = ? AND chat_id = ?
+                    ORDER BY id
+                    """,
+                    (account_id, chat["id"]),
+                ).fetchall()
+                messages = _messages_with_preserved_history_text(chat["messages"], existing_messages)
                 connection.execute(
                     "DELETE FROM messages WHERE account_id = ? AND chat_id = ?",
                     (account_id, chat["id"]),
                 )
                 connection.executemany(
                     """
-                    INSERT INTO messages (account_id, chat_id, speaker, text, source, thought_seconds, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO messages
+                        (account_id, chat_id, speaker, text, history_text, source, thought_seconds, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -433,11 +454,12 @@ class LearnyDatabase:
                             chat["id"],
                             message["speaker"],
                             message["text"],
+                            message["historyText"],
                             message["source"],
                             message["thoughtSeconds"],
                             message["createdAt"],
                         )
-                        for message in chat["messages"]
+                        for message in messages
                     ],
                 )
 
@@ -478,12 +500,14 @@ class LearnyDatabase:
         text: str,
         source: str = "",
         thought_seconds: float | None = None,
+        history_text: str | None = None,
     ) -> None:
         clean_chat_id = _clean_identifier(chat_id, "chat")
         clean_message = _clean_message_payload(
             {
                 "speaker": speaker,
                 "text": text,
+                "historyText": history_text,
                 "source": source,
                 "thoughtSeconds": thought_seconds,
                 "createdAt": _now_ms(),
@@ -499,14 +523,16 @@ class LearnyDatabase:
                 return
             connection.execute(
                 """
-                INSERT INTO messages (account_id, chat_id, speaker, text, source, thought_seconds, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO messages
+                    (account_id, chat_id, speaker, text, history_text, source, thought_seconds, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     account_id,
                     clean_chat_id,
                     clean_message["speaker"],
                     clean_message["text"],
+                    clean_message["historyText"],
                     clean_message["source"],
                     clean_message["thoughtSeconds"],
                     clean_message["createdAt"],
@@ -522,7 +548,7 @@ class LearnyDatabase:
         with self._lock, self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT messages.speaker, messages.text
+                SELECT messages.speaker, messages.text, messages.history_text
                 FROM messages
                 WHERE messages.account_id = ? AND messages.chat_id = ?
                 ORDER BY messages.id
@@ -536,7 +562,8 @@ class LearnyDatabase:
             speaker = str(row["speaker"])
             text = str(row["text"])
             if speaker == "You":
-                pending_user = text
+                history_text = str(row["history_text"] or "").strip()
+                pending_user = history_text or text
             elif speaker == "Learny" and pending_user:
                 history.add(pending_user, text)
                 pending_user = ""
@@ -621,14 +648,61 @@ def _clean_message_payload(message: dict[str, Any]) -> dict[str, Any]:
     if len(text) > 20_000:
         text = text[:20_000]
     source = str(message.get("source", "")).strip()[:80]
+    history_text = _clean_history_text(message.get("historyText"), fallback=text)
     thought_seconds = _clean_thought_seconds(message.get("thoughtSeconds"))
     return {
         "speaker": speaker,
         "text": text,
+        "historyText": history_text,
         "source": source,
         "thoughtSeconds": thought_seconds,
         "createdAt": _clean_timestamp(message.get("createdAt"), now),
     }
+
+
+def _clean_history_text(value: Any, *, fallback: str) -> str:
+    if value is None:
+        text = fallback
+    else:
+        text = str(value).strip()
+    if not text:
+        text = fallback
+    if len(text) > 40_000:
+        text = text[:40_000]
+    return text
+
+
+def _messages_with_preserved_history_text(
+    messages: list[dict[str, Any]],
+    existing_rows: list[Any],
+) -> list[dict[str, Any]]:
+    preserved: list[dict[str, Any]] = []
+    for index, message in enumerate(messages):
+        next_message = dict(message)
+        existing_history_text = ""
+        if index < len(existing_rows):
+            row = existing_rows[index]
+            if (
+                _row_string(row, "speaker") == str(message["speaker"])
+                and _row_string(row, "text") == str(message["text"])
+            ):
+                existing_history_text = _row_string(row, "history_text").strip()
+        if existing_history_text:
+            next_message["historyText"] = existing_history_text
+        else:
+            next_message["historyText"] = _clean_history_text(
+                next_message.get("historyText"),
+                fallback=str(next_message["text"]),
+            )
+        preserved.append(next_message)
+    return preserved
+
+
+def _row_string(row: Any, key: str) -> str:
+    try:
+        return str(row[key])
+    except (KeyError, IndexError, TypeError):
+        return ""
 
 
 def _clean_timestamp(value: Any, fallback: int) -> int:

@@ -21,6 +21,9 @@ const rateLimitPopupSeconds = document.querySelector("#rateLimitPopupSeconds");
 const rateLimitPopupUnit = document.querySelector("#rateLimitPopupUnit");
 const rateLimitPopupFill = document.querySelector("#rateLimitPopupFill");
 const rateLimitDescription = document.querySelector("#rateLimitDescription");
+const attachmentAuthModal = document.querySelector("#attachmentAuthModal");
+const attachmentAuthBackdrop = document.querySelector("#attachmentAuthBackdrop");
+const attachmentAuthOk = document.querySelector("#attachmentAuthOk");
 const emptyState = document.querySelector("#emptyState");
 const starField = document.querySelector("#starField");
 const appShell = document.querySelector(".app-shell");
@@ -1059,6 +1062,32 @@ function closeRateLimitPopup() {
   }
   if (!isRateLimited()) {
     syncComposerAvailability();
+  }
+}
+
+function openAttachmentAuthPopup() {
+  if (!attachmentAuthModal) {
+    return;
+  }
+
+  attachmentAuthModal.hidden = false;
+  document.body.classList.add("attachment-auth-open");
+  window.setTimeout(() => {
+    if (attachmentAuthOk) {
+      attachmentAuthOk.focus();
+    }
+  }, 70);
+}
+
+function closeAttachmentAuthPopup() {
+  if (!attachmentAuthModal || attachmentAuthModal.hidden) {
+    return;
+  }
+
+  attachmentAuthModal.hidden = true;
+  document.body.classList.remove("attachment-auth-open");
+  if (attachButton && !DIRECT_FILE_MODE) {
+    attachButton.focus();
   }
 }
 
@@ -2525,6 +2554,7 @@ async function handleAccountSignOut() {
     );
   } catch (error) {} finally {
     clearSignedInLocalState();
+    clearSelectedAttachments();
     await loadRateLimit();
     accountSignOutButton.disabled = false;
     accountSignOutButton.textContent = "Sign out";
@@ -2553,6 +2583,7 @@ async function handleAccountDelete() {
       throw new Error(GENERIC_ERROR_MESSAGE);
     }
     clearSignedInLocalState();
+    clearSelectedAttachments();
     await loadRateLimit();
     openAccountModal("sign-in");
   } catch (error) {} finally {
@@ -2577,6 +2608,11 @@ chatForm.addEventListener("submit", (event) => {
     openRateLimitPopup();
     return;
   }
+  if (!currentAccount && selectedAttachments.length > 0) {
+    clearSelectedAttachments();
+    openAttachmentAuthPopup();
+    return;
+  }
   const attachments = [...selectedAttachments];
   messageInput.value = "";
   clearSelectedAttachments();
@@ -2588,11 +2624,21 @@ if (attachButton && fileInput) {
     if (isSending || DIRECT_FILE_MODE) {
       return;
     }
+    if (!currentAccount) {
+      clearSelectedAttachments();
+      openAttachmentAuthPopup();
+      return;
+    }
     fileInput.click();
   });
 
   fileInput.addEventListener("change", (event) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
+    if (!currentAccount) {
+      clearSelectedAttachments();
+      openAttachmentAuthPopup();
+      return;
+    }
     if (files.length === 0) {
       return;
     }
@@ -2636,6 +2682,14 @@ if (rateLimitClose) {
 
 if (rateLimitOk) {
   rateLimitOk.addEventListener("click", closeRateLimitPopup);
+}
+
+if (attachmentAuthBackdrop) {
+  attachmentAuthBackdrop.addEventListener("click", closeAttachmentAuthPopup);
+}
+
+if (attachmentAuthOk) {
+  attachmentAuthOk.addEventListener("click", closeAttachmentAuthPopup);
 }
 
 if (signInForm) {
@@ -2731,6 +2785,10 @@ if (mobileSidebarMedia) {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (attachmentAuthModal && !attachmentAuthModal.hidden) {
+      closeAttachmentAuthPopup();
+      return;
+    }
     if (rateLimitModal && !rateLimitModal.hidden) {
       closeRateLimitPopup();
       return;

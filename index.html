@@ -442,6 +442,23 @@
       </section>
     </div>
 
+    <div class="attachment-auth-modal" id="attachmentAuthModal" hidden>
+      <button class="attachment-auth-backdrop" id="attachmentAuthBackdrop" type="button" aria-label="Close attachment popup"></button>
+      <section
+        class="attachment-auth-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attachmentAuthTitle"
+        aria-describedby="attachmentAuthDescription"
+      >
+        <div class="attachment-auth-copy">
+          <h2 id="attachmentAuthTitle">Account required</h2>
+          <p id="attachmentAuthDescription">You must create an account to attach files to your message.</p>
+        </div>
+        <button class="attachment-auth-ok" id="attachmentAuthOk" type="button">Got it!</button>
+      </section>
+    </div>
+
     <template id="messageTemplate">
       <article class="message">
         <div class="message-meta">

@@ -26,6 +26,7 @@ from .database import (
     _hash_password,
     _hash_token,
     _message_from_row,
+    _messages_with_preserved_history_text,
     _now_ms,
     _rate_limit_payload,
     _rate_limit_window,
@@ -137,6 +138,7 @@ class MySQLLearnyDatabase:
                 chat_id VARCHAR(120) NOT NULL,
                 speaker VARCHAR(16) NOT NULL,
                 text MEDIUMTEXT NOT NULL,
+                history_text MEDIUMTEXT NULL,
                 source VARCHAR(80) NOT NULL DEFAULT '',
                 thought_seconds DOUBLE NULL,
                 created_at BIGINT NOT NULL,
@@ -176,6 +178,11 @@ class MySQLLearnyDatabase:
                 if cursor.fetchone() is None:
                     cursor.execute(
                         "ALTER TABLE accounts ADD COLUMN profile_picture MEDIUMTEXT NULL AFTER password_hash"
+                    )
+                cursor.execute("SHOW COLUMNS FROM messages LIKE 'history_text'")
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        "ALTER TABLE messages ADD COLUMN history_text MEDIUMTEXT NULL AFTER text"
                     )
 
     def create_account(self, username: str, password: str) -> dict[str, Any]:
@@ -510,15 +517,26 @@ class MySQLLearnyDatabase:
                         ),
                     )
                     cursor.execute(
+                        """
+                        SELECT speaker, text, history_text
+                        FROM messages
+                        WHERE account_id = %s AND chat_id = %s
+                        ORDER BY id
+                        """,
+                        (account_id, chat["id"]),
+                    )
+                    existing_messages = cursor.fetchall()
+                    messages = _messages_with_preserved_history_text(chat["messages"], existing_messages)
+                    cursor.execute(
                         "DELETE FROM messages WHERE account_id = %s AND chat_id = %s",
                         (account_id, chat["id"]),
                     )
-                    if chat["messages"]:
+                    if messages:
                         cursor.executemany(
                             """
                             INSERT INTO messages
-                                (account_id, chat_id, speaker, text, source, thought_seconds, created_at)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                (account_id, chat_id, speaker, text, history_text, source, thought_seconds, created_at)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                             """,
                             [
                                 (
@@ -526,11 +544,12 @@ class MySQLLearnyDatabase:
                                     chat["id"],
                                     message["speaker"],
                                     message["text"],
+                                    message["historyText"],
                                     message["source"],
                                     message["thoughtSeconds"],
                                     message["createdAt"],
                                 )
-                                for message in chat["messages"]
+                                for message in messages
                             ],
                         )
 
@@ -572,12 +591,14 @@ class MySQLLearnyDatabase:
         text: str,
         source: str = "",
         thought_seconds: float | None = None,
+        history_text: str | None = None,
     ) -> None:
         clean_chat_id = _clean_identifier(chat_id, "chat")
         clean_message = _clean_message_payload(
             {
                 "speaker": speaker,
                 "text": text,
+                "historyText": history_text,
                 "source": source,
                 "thoughtSeconds": thought_seconds,
                 "createdAt": _now_ms(),
@@ -595,14 +616,15 @@ class MySQLLearnyDatabase:
                 cursor.execute(
                     """
                     INSERT INTO messages
-                        (account_id, chat_id, speaker, text, source, thought_seconds, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        (account_id, chat_id, speaker, text, history_text, source, thought_seconds, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         account_id,
                         clean_chat_id,
                         clean_message["speaker"],
                         clean_message["text"],
+                        clean_message["historyText"],
                         clean_message["source"],
                         clean_message["thoughtSeconds"],
                         clean_message["createdAt"],
@@ -619,7 +641,7 @@ class MySQLLearnyDatabase:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT speaker, text
+                    SELECT speaker, text, history_text
                     FROM messages
                     WHERE account_id = %s AND chat_id = %s
                     ORDER BY id
@@ -634,7 +656,8 @@ class MySQLLearnyDatabase:
             speaker = str(row["speaker"])
             text = str(row["text"])
             if speaker == "You":
-                pending_user = text
+                history_text = str(row.get("history_text") or "").strip()
+                pending_user = history_text or text
             elif speaker == "Learny" and pending_user:
                 history.add(pending_user, text)
                 pending_user = ""

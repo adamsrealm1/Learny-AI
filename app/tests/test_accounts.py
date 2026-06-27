@@ -41,6 +41,22 @@ class CountingAnswerGenerator(StaticAnswerGenerator):
         return super().generate(question, history)
 
 
+class CapturingHistoryAnswerGenerator:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def generate(
+        self,
+        question: str,
+        history: ConversationHistory,
+    ) -> GeneratedAnswer:
+        self.calls.append({"question": question, "history": history.recent()})
+        return GeneratedAnswer(
+            answer=f"Captured answer {len(self.calls)}.",
+            model=PRIMARY_GROQ_MODEL,
+        )
+
+
 class NoAnswerGenerator:
     def generate(
         self,
@@ -157,6 +173,46 @@ class AccountWebTests(unittest.TestCase):
             [message["speaker"] for message in chats["chats"][0]["messages"]],
             ["You", "Learny", "You", "Learny"],
         )
+
+    def test_signed_in_attachment_follow_up_uses_hidden_file_history(self) -> None:
+        generator = CapturingHistoryAnswerGenerator()
+        with run_account_server(lambda: generator) as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "file_user", "password": "strong-password"},
+            )
+            first = server.post_multipart(
+                "/api/ask",
+                fields={
+                    "message": "What does this file say?",
+                    "chatId": "file-chat",
+                    "sessionId": "file-session",
+                },
+                filename="NE.md",
+                content_type="text/markdown",
+                content=b"# NOODLE EXTENSIONS\nExact hidden file line.",
+            )
+            visible_chats = server.get_json("/api/chats")
+            server.post_json("/api/chats/sync", {"chats": visible_chats["chats"]})
+            second = server.post_json(
+                "/api/ask",
+                {
+                    "message": "read to me the exact thing that the file says",
+                    "chatId": "file-chat",
+                    "sessionId": first["sessionId"],
+                },
+            )
+
+        self.assertEqual(first["answer"], "Captured answer 1.")
+        self.assertEqual(second["answer"], "Captured answer 2.")
+        self.assertEqual(len(generator.calls), 2)
+        self.assertEqual(generator.calls[1]["question"], "read to me the exact thing that the file says")
+        history = generator.calls[1]["history"]
+        self.assertEqual(len(history), 1)
+        self.assertIn("Attachment instructions:", history[0].user)
+        self.assertIn("Name: NE.md", history[0].user)
+        self.assertIn("Exact hidden file line.", history[0].user)
+        self.assertNotIn("Exact hidden file line.", json.dumps(visible_chats))
 
     def test_rate_limit_blocks_201st_signed_in_ask_without_persisting(self) -> None:
         CountingAnswerGenerator.calls = 0
@@ -526,6 +582,48 @@ class run_account_server:
         with self.opener.open(request, timeout=10) as response:
             response.read()
             return response.headers
+
+    def post_multipart(
+        self,
+        path: str,
+        *,
+        fields: dict[str, str],
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ) -> dict[str, Any]:
+        boundary = "----LearnyAccountTestBoundary"
+        chunks: list[bytes] = []
+        for name, value in fields.items():
+            chunks.extend(
+                [
+                    f"--{boundary}\r\n".encode("utf-8"),
+                    f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+                    value.encode("utf-8"),
+                    b"\r\n",
+                ]
+            )
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                (
+                    'Content-Disposition: form-data; name="attachments"; '
+                    f'filename="{filename}"\r\n'
+                ).encode("utf-8"),
+                f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+                content,
+                b"\r\n",
+                f"--{boundary}--\r\n".encode("utf-8"),
+            ]
+        )
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=b"".join(chunks),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with self.opener.open(request, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
 
     def get_text(self, path: str) -> str:
         with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:
