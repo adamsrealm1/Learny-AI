@@ -268,6 +268,7 @@ const captchaControls = {
     button: signInSubmitButton,
     token: "",
     widgetId: null,
+    state: "idle",
   },
   createAccount: {
     action: "create-account",
@@ -275,6 +276,7 @@ const captchaControls = {
     button: createAccountSubmitButton,
     token: "",
     widgetId: null,
+    state: "idle",
   },
   deleteAccount: {
     action: "delete-account",
@@ -282,6 +284,7 @@ const captchaControls = {
     button: accountDeleteConfirmButton,
     token: "",
     widgetId: null,
+    state: "idle",
   },
   attachment: {
     action: "attachment",
@@ -289,6 +292,7 @@ const captchaControls = {
     button: attachmentAuthOk,
     token: "",
     widgetId: null,
+    state: "idle",
   },
 };
 const mobileSidebarMedia = window.matchMedia
@@ -1228,6 +1232,26 @@ function isCaptchaEnabled() {
   return Boolean(captchaConfig.enabled && captchaConfig.siteKey);
 }
 
+function waitForRecaptchaReady(timeoutMs = 10000) {
+  if (window.grecaptcha && typeof window.grecaptcha.render === "function") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const timerId = window.setInterval(() => {
+      if (window.grecaptcha && typeof window.grecaptcha.render === "function") {
+        window.clearInterval(timerId);
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        window.clearInterval(timerId);
+        reject(new Error(GENERIC_ERROR_MESSAGE));
+      }
+    }, 120);
+  });
+}
+
 function loadRecaptchaScript() {
   if (!isCaptchaEnabled()) {
     return Promise.resolve();
@@ -1242,8 +1266,9 @@ function loadRecaptchaScript() {
   recaptchaScriptPromise = new Promise((resolve, reject) => {
     const existing = document.querySelector(`#${RECAPTCHA_SCRIPT_ID}`);
     if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("load", () => waitForRecaptchaReady().then(resolve, reject), { once: true });
       existing.addEventListener("error", () => reject(new Error(GENERIC_ERROR_MESSAGE)), { once: true });
+      waitForRecaptchaReady().then(resolve, reject);
       return;
     }
 
@@ -1252,7 +1277,7 @@ function loadRecaptchaScript() {
     script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
     script.async = true;
     script.defer = true;
-    script.addEventListener("load", () => resolve(), { once: true });
+    script.addEventListener("load", () => waitForRecaptchaReady().then(resolve, reject), { once: true });
     script.addEventListener("error", () => reject(new Error(GENERIC_ERROR_MESSAGE)), { once: true });
     document.head.append(script);
   });
@@ -1275,6 +1300,17 @@ function setCaptchaToken(name, token) {
 function captchaToken(name) {
   const control = captchaControl(name);
   return control ? control.token : "";
+}
+
+function setCaptchaState(name, state, message = "") {
+  const control = captchaControl(name);
+  if (!control || !control.element) {
+    return;
+  }
+  control.state = state;
+  control.element.dataset.captchaState = state;
+  control.element.dataset.captchaMessage = message;
+  control.element.setAttribute("aria-busy", state === "loading" ? "true" : "false");
 }
 
 function syncCaptchaButtons() {
@@ -1301,39 +1337,56 @@ async function renderCaptchaControl(name) {
   control.element.hidden = !isCaptchaEnabled();
   if (!isCaptchaEnabled()) {
     control.token = "";
+    setCaptchaState(name, "idle");
     syncCaptchaButtons();
     return;
   }
-  await loadRecaptchaScript();
-  if (!window.grecaptcha || typeof window.grecaptcha.render !== "function") {
-    throw new Error(GENERIC_ERROR_MESSAGE);
-  }
   if (control.widgetId !== null) {
+    setCaptchaState(name, "ready");
     return;
   }
-  control.widgetId = window.grecaptcha.render(control.element, {
-    sitekey: captchaConfig.siteKey,
-    theme: "dark",
-    callback: (token) => setCaptchaToken(name, token),
-    "expired-callback": () => setCaptchaToken(name, ""),
-    "error-callback": () => setCaptchaToken(name, ""),
-  });
-  syncCaptchaButtons();
+  setCaptchaState(name, "loading", "Loading verification...");
+  try {
+    await loadRecaptchaScript();
+    if (!window.grecaptcha || typeof window.grecaptcha.render !== "function") {
+      throw new Error(GENERIC_ERROR_MESSAGE);
+    }
+    control.widgetId = window.grecaptcha.render(control.element, {
+      sitekey: captchaConfig.siteKey,
+      theme: "dark",
+      callback: (token) => {
+        setCaptchaState(name, "ready");
+        setCaptchaToken(name, token);
+      },
+      "expired-callback": () => setCaptchaToken(name, ""),
+      "error-callback": () => {
+        setCaptchaState(name, "error", "Something went wrong. Try again later.");
+        setCaptchaToken(name, "");
+      },
+    });
+    setCaptchaState(name, "ready");
+    syncCaptchaButtons();
+  } catch (error) {
+    setCaptchaState(name, "error", "Something went wrong. Try again later.");
+    throw error;
+  }
 }
 
 function queueCaptchaRender(name) {
   renderCaptchaControl(name).catch(() => {
     resetCaptchaControl(name);
+    setCaptchaState(name, "error", "Something went wrong. Try again later.");
   });
 }
 
 async function renderCaptchaControls() {
   if (!isCaptchaEnabled()) {
-    Object.values(captchaControls).forEach((control) => {
+    Object.entries(captchaControls).forEach(([name, control]) => {
       if (control.element) {
         control.element.hidden = true;
       }
       control.token = "";
+      setCaptchaState(name, "idle");
     });
     syncCaptchaButtons();
     return;
@@ -1365,6 +1418,9 @@ function resetCaptchaControl(name) {
     return;
   }
   control.token = "";
+  if (control.widgetId === null && isCaptchaEnabled()) {
+    setCaptchaState(name, "idle");
+  }
   if (
     isCaptchaEnabled() &&
     control.widgetId !== null &&

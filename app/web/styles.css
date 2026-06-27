@@ -772,6 +772,7 @@ body.account-modal-open {
 }
 
 .captcha-slot {
+  position: relative;
   display: grid;
   min-height: 78px;
   align-items: center;
@@ -781,6 +782,36 @@ body.account-modal-open {
   border-radius: 16px;
   background: rgba(0, 0, 0, 0.18);
   overflow: hidden;
+}
+
+.captcha-slot[data-captcha-state="loading"],
+.captcha-slot[data-captcha-state="error"] {
+  justify-items: center;
+}
+
+.captcha-slot[data-captcha-state="loading"]::before,
+.captcha-slot[data-captcha-state="error"]::before {
+  content: attr(data-captcha-message);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 0.84rem;
+  font-weight: 720;
+  text-align: center;
+}
+
+.captcha-slot[data-captcha-state="loading"]::after {
+  content: "";
+  width: 17px;
+  height: 17px;
+  margin-left: 10px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(255, 255, 255, 0.82);
+  border-radius: 50%;
+  animation: spinner-c7wet2 820ms linear infinite;
+}
+
+.captcha-slot[data-captcha-state="error"] {
+  border-color: rgba(255, 126, 126, 0.28);
+  background: rgba(255, 70, 70, 0.1);
 }
 
 .captcha-slot.danger {
