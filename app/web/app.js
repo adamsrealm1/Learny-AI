@@ -3,7 +3,6 @@ const chatForm = document.querySelector("#chatForm");
 const messageInput = document.querySelector("#messageInput");
 const sendButton = document.querySelector("#sendButton");
 const messageTemplate = document.querySelector("#messageTemplate");
-const connectionPill = document.querySelector("#connectionPill");
 const chatList = document.querySelector("#chatList");
 const addChatButton = document.querySelector("#addChatButton");
 const chatSearchInput = document.querySelector("#chatSearchInput");
@@ -83,7 +82,6 @@ const WELCOME_LOCK_DELAY_MS = 2200;
 const WELCOME_SWAP_FADE_MS = 1000;
 const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
-const STATUS_CHECK_INTERVAL_MS = 15000;
 const STATUS_FETCH_TIMEOUT_MS = 8000;
 const ASK_RETRY_BASE_DELAY_MS = 1200;
 const ASK_RETRY_MAX_DELAY_MS = 3500;
@@ -135,7 +133,6 @@ let rateLimitPopupTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
 let activeAccountView = "";
-let serverOnlineSeen = false;
 const mobileSidebarMedia = window.matchMedia
   ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
   : null;
@@ -1058,9 +1055,7 @@ async function refreshAccountModalDetails() {
       currentAccountStats = data.stats || null;
       updateAccountButton();
     }
-  } catch (error) {
-    setConnection("offline", "Servers offline");
-  }
+  } catch (error) {}
   renderAccountModalDetails();
 }
 
@@ -1181,9 +1176,7 @@ async function syncChatsToServer() {
       },
       activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
     );
-  } catch (error) {
-    setConnection("offline", "Servers offline");
-  }
+  } catch (error) {}
 }
 
 async function loadAccountAndChats() {
@@ -1344,12 +1337,6 @@ function setEmptyState(visible) {
   }
 }
 
-function setConnection(state, label) {
-  connectionPill.classList.remove("checking", "online", "offline");
-  connectionPill.classList.add(state);
-  connectionPill.querySelector("strong").textContent = label;
-}
-
 function releaseLoadingScreen() {
   if (window.LearnyLoading && typeof window.LearnyLoading.release === "function") {
     window.LearnyLoading.release();
@@ -1362,16 +1349,6 @@ function releaseLoadingScreen() {
   if (loader) {
     loader.remove();
   }
-}
-
-function handleServerOnline() {
-  releaseLoadingScreen();
-  if (serverOnlineSeen) {
-    return;
-  }
-  serverOnlineSeen = true;
-  loadAccountAndChats();
-  loadRateLimit();
 }
 
 function sourceLabel() {
@@ -2013,34 +1990,6 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
   throw lastError || new Error(GENERIC_ERROR_MESSAGE);
 }
 
-async function loadStatus() {
-  setConnection("checking", "Checking server status...");
-
-  if (DIRECT_FILE_MODE) {
-    setConnection("offline", "Servers offline");
-    return;
-  }
-
-  try {
-    const status = await apiFetch(
-      "/api/status",
-      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
-      API_BASE_CANDIDATES,
-    );
-    const online = Boolean(status.ok);
-    setConnection(online ? "online" : "offline", online ? "Servers online" : "Servers offline");
-    if (online) {
-      handleServerOnline();
-    }
-  } catch (error) {
-    if (isSending) {
-      setConnection("checking", "Checking server status...");
-      return;
-    }
-    setConnection("offline", "Servers offline");
-  }
-}
-
 async function loadRateLimit() {
   if (DIRECT_FILE_MODE) {
     updateRateLimit(DEFAULT_RATE_LIMIT);
@@ -2128,7 +2077,6 @@ async function askLearny(message, { addUserMessage = true } = {}) {
           source: sourceLabel(),
           thoughtSeconds,
         }, { animateWords: true });
-        await loadStatus();
         completed = true;
       } catch (error) {
         if (error && error.status === 429 && error.data && error.data.rateLimit) {
@@ -2144,7 +2092,6 @@ async function askLearny(message, { addUserMessage = true } = {}) {
         }
 
         attempt += 1;
-        setConnection("checking", "Checking server status...");
         await sleep(askRetryDelay(attempt));
       }
     }
@@ -2265,9 +2212,7 @@ async function handleAccountProfilePictureButton() {
   try {
     await saveAccountProfilePicture(null);
     accountProfilePictureInput.value = "";
-  } catch (error) {
-    setConnection("offline", "Servers offline");
-  } finally {
+  } catch (error) {} finally {
     setProfilePictureButtonBusy(false);
   }
 }
@@ -2282,9 +2227,7 @@ async function handleAccountProfilePictureInputChange(event) {
   try {
     const profilePicture = await readProfilePictureFile(file);
     await saveAccountProfilePicture(profilePicture);
-  } catch (error) {
-    setConnection("offline", "Servers offline");
-  } finally {
+  } catch (error) {} finally {
     event.target.value = "";
     setProfilePictureButtonBusy(false);
   }
@@ -2307,9 +2250,7 @@ async function handleAccountSignOut() {
       },
       activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
     );
-  } catch (error) {
-    setConnection("offline", "Servers offline");
-  } finally {
+  } catch (error) {} finally {
     clearSignedInLocalState();
     await loadRateLimit();
     accountSignOutButton.disabled = false;
@@ -2341,9 +2282,7 @@ async function handleAccountDelete() {
     clearSignedInLocalState();
     await loadRateLimit();
     openAccountModal("sign-in");
-  } catch (error) {
-    setConnection("offline", "Servers offline");
-  } finally {
+  } catch (error) {} finally {
     accountDeleteConfirmButton.disabled = false;
     accountDeleteConfirmButton.textContent = "Delete forever";
   }
@@ -2546,8 +2485,5 @@ if (DIRECT_FILE_MODE) {
 }
 
 loadAccountAndChats();
-loadStatus();
 loadRateLimit();
-if (!DIRECT_FILE_MODE) {
-  window.setInterval(loadStatus, STATUS_CHECK_INTERVAL_MS);
-}
+releaseLoadingScreen();

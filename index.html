@@ -134,7 +134,7 @@
   </head>
   <body class="site-loading">
     <div class="loading-screen" id="loadingScreen" role="status" aria-label="Loading Learny AI">
-      <img class="loading-logo" src="./Learny.png" alt="Learny AI">
+      <img class="loading-logo" src="./Learny_NOBG.png" alt="Learny AI">
       <div class="spinner"></div>
       <button class="loading-skip" id="loadingSkipButton" type="button">Skip</button>
     </div>
@@ -180,10 +180,6 @@
           }
         });
 
-        window.addEventListener("learny:server-online", () => {
-          window.LearnyLoading.release();
-        });
-
       })();
     </script>
     <div class="app-shell">
@@ -191,7 +187,7 @@
 
       <aside class="sidebar" id="sidebar" aria-label="Learny navigation">
         <header class="sidebar-header">
-          <img class="brand-logo" src="./Learny.png" alt="Learny AI">
+          <img class="brand-logo" src="./Learny_NOBG.png" alt="Learny AI">
           <button class="sidebar-toggle" type="button" title="Collapse sidebar">
             <img class="ui-icon collapse-icon" src="./app/icon_library/collapse.png" alt="" aria-hidden="true">
             <span class="sr-only">Collapse sidebar</span>
@@ -260,10 +256,6 @@
             >
             <span class="message-search-count" id="messageSearchCount" aria-live="polite"></span>
           </label>
-          <div class="connection-pill" id="connectionPill">
-            <span></span>
-            <strong>Checking server status...</strong>
-          </div>
         </header>
 
         <section class="chat-panel" aria-label="Learny chat">

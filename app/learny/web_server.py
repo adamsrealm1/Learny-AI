@@ -42,6 +42,7 @@ ACCOUNT_SESSION_COOKIE = "learny_account"
 PUBLIC_ROOT_FILES = {
     "index.html",
     "Learny.png",
+    "Learny_NOBG.png",
 }
 ALLOWED_CORS_ORIGINS = {
     "https://learny.env.pm",

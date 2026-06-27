@@ -1350,53 +1350,6 @@ body.account-modal-open {
   text-align: right;
 }
 
-.connection-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  flex: 0 0 auto;
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  color: var(--muted);
-  background: rgba(0, 0, 0, 0.26);
-  font-size: 0.76rem;
-  backdrop-filter: blur(12px);
-}
-
-.connection-pill span {
-  width: 9px;
-  height: 9px;
-  border: 1px solid #a8a8a8;
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: spin 850ms linear infinite;
-}
-
-.connection-pill.checking span {
-  border-color: #a8a8a8;
-  border-top-color: transparent;
-}
-
-.connection-pill.online span {
-  border-color: #7edc89;
-  background: #7edc89;
-  box-shadow: 0 0 12px rgba(126, 220, 137, 0.5);
-  animation: none;
-}
-
-.connection-pill.offline span {
-  border-color: var(--error);
-  background: transparent;
-  box-shadow: 0 0 10px rgba(255, 107, 107, 0.42);
-  animation: none;
-}
-
-.connection-pill strong {
-  font-weight: 550;
-}
-
 .chat-panel {
   position: relative;
   display: grid;
@@ -2595,15 +2548,6 @@ body.account-modal-open {
     min-width: 0;
   }
 
-  .connection-pill {
-    max-width: 168px;
-  }
-
-  .connection-pill strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 }
 
 @media (max-width: 560px) {
@@ -2661,10 +2605,6 @@ body.account-modal-open {
     height: 36px;
   }
 
-  .connection-pill {
-    min-height: 40px;
-  }
-
   .sidebar {
     width: min(330px, 92vw);
     padding-top: max(12px, env(safe-area-inset-top));
@@ -2717,22 +2657,6 @@ body.account-modal-open {
     display: none;
   }
 
-  .connection-pill {
-    max-width: 38px;
-    padding: 0 10px;
-  }
-
-  .connection-pill strong {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
