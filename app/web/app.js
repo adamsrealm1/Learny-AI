@@ -1328,6 +1328,20 @@ function syncCaptchaButtons() {
   });
 }
 
+function captchaRenderTarget(control) {
+  if (!control || !control.element) {
+    return null;
+  }
+  if (control.renderTarget && control.renderTarget.isConnected) {
+    return control.renderTarget;
+  }
+  const target = document.createElement("div");
+  target.className = "captcha-widget-clip";
+  control.element.append(target);
+  control.renderTarget = target;
+  return target;
+}
+
 async function renderCaptchaControl(name) {
   const control = captchaControl(name);
   if (!control || !control.element) {
@@ -1351,7 +1365,11 @@ async function renderCaptchaControl(name) {
     if (!window.grecaptcha || typeof window.grecaptcha.render !== "function") {
       throw new Error(GENERIC_ERROR_MESSAGE);
     }
-    control.widgetId = window.grecaptcha.render(control.element, {
+    const renderTarget = captchaRenderTarget(control);
+    if (!renderTarget) {
+      throw new Error(GENERIC_ERROR_MESSAGE);
+    }
+    control.widgetId = window.grecaptcha.render(renderTarget, {
       sitekey: captchaConfig.siteKey,
       theme: "dark",
       callback: (token) => {

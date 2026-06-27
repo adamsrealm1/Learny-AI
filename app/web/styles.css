@@ -772,18 +772,21 @@ body.account-modal-open {
 }
 
 .captcha-slot {
+  --captcha-crop: 3px;
+  --captcha-scale: 1.032;
   position: relative;
   display: flex;
-  width: 340px;
+  width: 304px;
   max-width: 100%;
-  min-height: 92px;
+  height: 78px;
+  min-height: 78px;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: 0;
   border-radius: 4px;
-  background: transparent;
-  overflow: visible;
+  background: #222;
+  overflow: hidden;
   line-height: 0;
 }
 
@@ -791,6 +794,8 @@ body.account-modal-open {
 .captcha-slot[data-captcha-state="error"] {
   display: grid;
   width: 100%;
+  height: auto;
+  min-height: 78px;
   justify-items: center;
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.095);
@@ -800,9 +805,24 @@ body.account-modal-open {
   line-height: normal;
 }
 
-.captcha-slot > div,
-.captcha-slot iframe {
+.captcha-widget-clip {
+  flex: 0 0 auto;
+  width: 304px;
+  height: 78px;
+  overflow: visible;
+  transform: translate(calc(var(--captcha-crop) * -1), calc(var(--captcha-crop) * -1)) scale(var(--captcha-scale));
+  transform-origin: top left;
+}
+
+.captcha-widget-clip > div,
+.captcha-widget-clip iframe {
   display: block;
+  border: 0 !important;
+}
+
+.captcha-slot[data-captcha-state="loading"] .captcha-widget-clip,
+.captcha-slot[data-captcha-state="error"] .captcha-widget-clip {
+  display: none;
 }
 
 .captcha-slot[data-captcha-state="loading"]::before,
