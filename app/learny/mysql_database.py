@@ -309,6 +309,25 @@ class MySQLLearnyDatabase:
             "lastSeenAt": now,
         }
 
+    def verify_password(self, account_id: int, password: str) -> bool:
+        try:
+            _validate_password(password)
+        except AccountError:
+            return False
+
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT password_salt, password_hash FROM accounts WHERE id = %s",
+                    (account_id,),
+                )
+                row = cursor.fetchone()
+
+        if row is None:
+            return False
+        expected_hash = _hash_password(password, str(row["password_salt"]))
+        return hmac.compare_digest(expected_hash, str(row["password_hash"]))
+
     def update_profile_picture(self, account_id: int, profile_picture: str | None) -> dict[str, Any]:
         now = _now_ms()
         with self._lock, self._connect() as connection:

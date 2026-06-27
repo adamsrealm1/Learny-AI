@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.cookiejar
 import json
 import threading
 import unittest
@@ -227,13 +228,19 @@ class LearnyGroqOnlyTests(unittest.TestCase):
     def test_multipart_attachment_context_is_sent_to_generator(self) -> None:
         generator = CapturingAnswerGenerator()
         with run_test_server(lambda: generator) as base_url:
+            opener, attachment_token = verified_attachment_opener(base_url, "multipart_user")
             data = post_multipart(
                 base_url,
                 "/api/ask",
-                fields={"message": "Summarize this file", "sessionId": "session-test"},
+                fields={
+                    "message": "Summarize this file",
+                    "sessionId": "session-test",
+                    "attachmentVerificationToken": attachment_token,
+                },
                 filename="notes.md",
                 content_type="text/markdown",
                 content=b"# Notes\nLearny should see this text.",
+                opener=opener,
             )
 
         self.assertEqual(data["answer"], "I read the attachment.")
@@ -253,11 +260,17 @@ class LearnyGroqOnlyTests(unittest.TestCase):
             for index in range(10)
         ]
         with run_test_server(lambda: generator) as base_url:
+            opener, attachment_token = verified_attachment_opener(base_url, "ten_files_user")
             data = post_multipart_files(
                 base_url,
                 "/api/ask",
-                fields={"message": "Compare these files", "sessionId": "session-test"},
+                fields={
+                    "message": "Compare these files",
+                    "sessionId": "session-test",
+                    "attachmentVerificationToken": attachment_token,
+                },
                 files=files,
+                opener=opener,
             )
 
         self.assertEqual(data["answer"], "I read the attachment.")
@@ -402,14 +415,41 @@ def get_json(base_url: str, path: str) -> dict[str, Any]:
 
 
 def post_json(base_url: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return post_json_with_opener(urllib.request, base_url, path, payload)
+
+
+def post_json_with_opener(
+    opener: Any,
+    base_url: str,
+    path: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
     request = urllib.request.Request(
         f"{base_url}{path}",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with open_request(opener, request, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def verified_attachment_opener(base_url: str, username: str) -> tuple[Any, str]:
+    cookie_jar = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    post_json_with_opener(
+        opener,
+        base_url,
+        "/api/accounts/create",
+        {"username": username, "password": "strong-password"},
+    )
+    verified = post_json_with_opener(
+        opener,
+        base_url,
+        "/api/attachments/verify",
+        {"password": "strong-password"},
+    )
+    return opener, str(verified["attachmentVerification"]["token"])
 
 
 def post_multipart(
@@ -420,12 +460,14 @@ def post_multipart(
     filename: str,
     content_type: str,
     content: bytes,
+    opener: Any = urllib.request,
 ) -> dict[str, Any]:
     return post_multipart_files(
         base_url,
         path,
         fields=fields,
         files=[(filename, content_type, content)],
+        opener=opener,
     )
 
 
@@ -435,6 +477,7 @@ def post_multipart_files(
     *,
     fields: dict[str, str],
     files: list[tuple[str, str, bytes]],
+    opener: Any = urllib.request,
 ) -> dict[str, Any]:
     boundary = "----LearnyTestBoundary"
     chunks: list[bytes] = []
@@ -468,8 +511,14 @@ def post_multipart_files(
         headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
+    with open_request(opener, request, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def open_request(opener: Any, request: urllib.request.Request, *, timeout: int) -> Any:
+    if hasattr(opener, "open"):
+        return opener.open(request, timeout=timeout)
+    return opener.urlopen(request, timeout=timeout)
 
 
 if __name__ == "__main__":

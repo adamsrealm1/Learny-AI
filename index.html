@@ -195,7 +195,6 @@
           <span class="admin-nav-mark" aria-hidden="true">A</span>
           <span>
             <strong>Admin Portal</strong>
-            <small>Operator controls</small>
           </span>
         </button>
 
@@ -252,7 +251,6 @@
             <span class="message-search-count" id="messageSearchCount" aria-live="polite"></span>
           </label>
           <div class="admin-top-title" id="adminTopTitle" hidden>
-            <span>Admin Portal</span>
             <strong>Control Center</strong>
           </div>
         </header>
@@ -300,7 +298,6 @@
           <div class="admin-portal-scroll">
             <header class="admin-hero">
               <div>
-                <p>Admin Portal</p>
                 <h1>Control Center</h1>
                 <span id="adminPortalSummary">No live data yet.</span>
               </div>
@@ -351,7 +348,7 @@
               <div class="admin-panel-heading">
                 <div>
                   <p class="admin-panel-kicker">Moderation</p>
-                  <h2>Active restrictions</h2>
+                  <h2>Active bans</h2>
                 </div>
                 <span id="adminBansCount">0</span>
               </div>
@@ -360,29 +357,29 @@
 
             <section class="admin-actions-shell">
               <form class="admin-action-card" id="adminBanUsernameForm">
-                <h3>Lock username</h3>
+                <h3>Ban user</h3>
                 <input name="username" type="text" placeholder="Username" autocomplete="off" required>
                 <textarea name="reason" placeholder="Reason" rows="3"></textarea>
-                <button type="submit">Restrict user</button>
+                <button type="submit">Ban user</button>
               </form>
 
               <form class="admin-action-card" id="adminUnbanUsernameForm">
-                <h3>Unlock username</h3>
+                <h3>Unban user</h3>
                 <input name="username" type="text" placeholder="Username" autocomplete="off" required>
-                <button type="submit">Restore access</button>
+                <button type="submit">Unban user</button>
               </form>
 
               <form class="admin-action-card" id="adminBanIpForm">
-                <h3>Lock IP</h3>
+                <h3>Ban IP</h3>
                 <input name="ip" type="text" placeholder="IP address" autocomplete="off" required>
                 <textarea name="reason" placeholder="Reason" rows="3"></textarea>
-                <button type="submit">Restrict network</button>
+                <button type="submit">Ban IP</button>
               </form>
 
               <form class="admin-action-card" id="adminUnbanIpForm">
-                <h3>Unlock IP</h3>
+                <h3>Unban IP</h3>
                 <input name="ip" type="text" placeholder="IP address" autocomplete="off" required>
-                <button type="submit">Restore network</button>
+                <button type="submit">Unban IP</button>
               </form>
 
               <form class="admin-action-card danger" id="adminDeleteAccountForm">
@@ -392,9 +389,9 @@
               </form>
 
               <form class="admin-action-card" id="adminGrantForm">
-                <h3>Promote admin</h3>
+                <h3>Give admin</h3>
                 <input name="username" type="text" placeholder="Username" autocomplete="off" required>
-                <button type="submit">Give portal access</button>
+                <button type="submit">Give admin</button>
               </form>
 
               <form class="admin-action-card danger" id="adminRevokeForm">
@@ -425,7 +422,7 @@
           </div>
           <div>
             <dt>Reason</dt>
-            <dd id="banLockReason">Access was restricted by Learny moderation.</dd>
+            <dd id="banLockReason">Access was blocked by Learny moderation.</dd>
           </div>
         </dl>
       </section>
@@ -461,7 +458,8 @@
               <span>Password</span>
               <input name="password" type="password" autocomplete="current-password" minlength="8" required>
             </label>
-            <button class="account-primary-action" type="submit">Sign in</button>
+            <div class="captcha-slot" id="signInCaptcha" data-captcha-action="sign-in"></div>
+            <button class="account-primary-action" id="signInSubmitButton" type="submit" disabled>Sign in</button>
           </form>
           <p class="account-form-message" id="signInMessage" aria-live="polite"></p>
           <button class="account-link-button" type="button" data-open-account-view="create-account">Create a new account</button>
@@ -477,7 +475,8 @@
               <span>Password</span>
               <input name="password" type="password" autocomplete="new-password" minlength="8" required>
             </label>
-            <button class="account-primary-action" type="submit">Create account</button>
+            <div class="captcha-slot" id="createAccountCaptcha" data-captcha-action="create-account"></div>
+            <button class="account-primary-action" id="createAccountSubmitButton" type="submit" disabled>Create account</button>
           </form>
           <p class="account-form-message" id="createAccountMessage" aria-live="polite"></p>
           <button class="account-link-button" type="button" data-open-account-view="sign-in">I already have an account</button>
@@ -527,9 +526,10 @@
             <button class="account-danger-action" id="accountDeleteButton" type="button">Delete account</button>
             <div class="account-danger-confirm" id="accountDeleteConfirm" hidden>
               <p>This will permanently delete all your data from Learny AI. Once deleted you may not restore your account.</p>
+              <div class="captcha-slot danger" id="deleteAccountCaptcha" data-captcha-action="delete-account"></div>
               <div>
                 <button class="account-secondary-action" id="accountDeleteCancel" type="button">Cancel</button>
-                <button class="account-danger-action solid" id="accountDeleteConfirmButton" type="button">Delete forever</button>
+                <button class="account-danger-action solid" id="accountDeleteConfirmButton" type="button" disabled>Delete forever</button>
               </div>
             </div>
           </section>
@@ -569,20 +569,31 @@
     </div>
 
     <div class="attachment-auth-modal" id="attachmentAuthModal" hidden>
-      <button class="attachment-auth-backdrop" id="attachmentAuthBackdrop" type="button" aria-label="Close attachment popup"></button>
+      <button class="attachment-auth-backdrop" id="attachmentAuthBackdrop" type="button" aria-label="Close attachment verification"></button>
       <section
         class="attachment-auth-dialog"
         role="dialog"
         aria-modal="true"
         aria-labelledby="attachmentAuthTitle"
-        aria-describedby="attachmentAuthDescription"
-      >
+        aria-describedby="attachmentAuthDescription">
+
+        <button class="attachment-auth-close" id="attachmentAuthClose" type="button" aria-label="Close attachment verification">
+          <img class="ui-icon x-icon" src="./app/icon_library/X.png" alt="" aria-hidden="true">
+        </button>
         <div class="attachment-auth-copy">
-          <h2 id="attachmentAuthTitle">Wait!</h2>
-          <p id="attachmentAuthDescription">You'll need to create an account to attach files to your message.</p> <br>
+          <h2 id="attachmentAuthTitle">Verify upload access</h2>
+          <p id="attachmentAuthDescription">You'll need to verify it's you before you can upload files.</p>
           <p>This is done to prevent spam, bots, and to keep a safer environment for Learny AI.</p>
         </div>
-        <button class="attachment-auth-ok" id="attachmentAuthOk" type="button">Got it!</button>
+        <form class="attachment-auth-form" id="attachmentAuthForm">
+          <label>
+            <span>Enter your password:</span>
+            <input id="attachmentAuthPassword" name="password" type="password" autocomplete="current-password" minlength="8" required>
+          </label>
+          <div class="captcha-slot" id="attachmentCaptcha" data-captcha-action="attachment"></div>
+          <p class="attachment-auth-message" id="attachmentAuthMessage" aria-live="polite"></p>
+          <button class="attachment-auth-ok" id="attachmentAuthOk" type="submit" disabled>Continue</button>
+        </form>
       </section>
     </div>
 
@@ -597,6 +608,6 @@
     </template>
 
     <script src="./app/web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./app/web/app.js?v=welcome-clean1" defer></script>
+    <script src="./app/web/app.js?v=welcome-final1" defer></script>
   </body>
 </html>

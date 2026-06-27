@@ -181,12 +181,17 @@ class AccountWebTests(unittest.TestCase):
                 "/api/accounts/create",
                 {"username": "file_user", "password": "strong-password"},
             )
+            verification = server.post_json(
+                "/api/attachments/verify",
+                {"password": "strong-password"},
+            )
             first = server.post_multipart(
                 "/api/ask",
                 fields={
                     "message": "What does this file say?",
                     "chatId": "file-chat",
                     "sessionId": "file-session",
+                    "attachmentVerificationToken": verification["attachmentVerification"]["token"],
                 },
                 filename="NE.md",
                 content_type="text/markdown",
@@ -623,11 +628,99 @@ class AccountWebTests(unittest.TestCase):
         self.assertIn("SameSite=None", cookies[0])
         self.assertIn("Secure", cookies[0])
 
+    def test_captcha_config_reports_enabled_site_key(self) -> None:
+        with run_account_server(captcha_site_key="test-site", captcha_verifier=lambda token, ip: token == "ok") as server:
+            config = server.get_json("/api/captcha/config")
+
+        self.assertTrue(config["captcha"]["enabled"])
+        self.assertEqual(config["captcha"]["siteKey"], "test-site")
+
+    def test_captcha_protects_auth_and_delete_account(self) -> None:
+        with run_account_server(captcha_site_key="test-site", captcha_verifier=lambda token, ip: token == "ok") as server:
+            blocked_create = server.post_json_status(
+                "/api/accounts/create",
+                {"username": "captcha_user", "password": "strong-password"},
+            )
+            created = server.post_json(
+                "/api/accounts/create",
+                {"username": "captcha_user", "password": "strong-password", "captchaToken": "ok"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            blocked_sign_in = server.post_json_status(
+                "/api/accounts/sign-in",
+                {"username": "captcha_user", "password": "strong-password"},
+            )
+            signed_in = server.post_json(
+                "/api/accounts/sign-in",
+                {"username": "captcha_user", "password": "strong-password", "captchaToken": "ok"},
+            )
+            blocked_delete = server.post_json_status("/api/accounts/delete", {})
+            deleted = server.post_json("/api/accounts/delete", {"captchaToken": "ok"})
+
+        self.assertEqual(blocked_create["status"], 403)
+        self.assertTrue(created["authenticated"])
+        self.assertEqual(blocked_sign_in["status"], 403)
+        self.assertTrue(signed_in["authenticated"])
+        self.assertEqual(blocked_delete["status"], 403)
+        self.assertTrue(deleted["deleted"])
+
+    def test_attachment_upload_requires_password_captcha_and_verification_token(self) -> None:
+        with run_account_server(captcha_site_key="test-site", captcha_verifier=lambda token, ip: token == "ok") as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "attach_user", "password": "strong-password", "captchaToken": "ok"},
+            )
+            blocked_captcha = server.post_json_status(
+                "/api/attachments/verify",
+                {"password": "strong-password"},
+            )
+            blocked_password = server.post_json_status(
+                "/api/attachments/verify",
+                {"password": "wrong-password", "captchaToken": "ok"},
+            )
+            verification = server.post_json(
+                "/api/attachments/verify",
+                {"password": "strong-password", "captchaToken": "ok"},
+            )
+            blocked_upload = server.post_multipart_status(
+                "/api/ask",
+                fields={"message": "read this", "chatId": "attach-chat", "sessionId": "attach-session"},
+                filename="note.txt",
+                content_type="text/plain",
+                content=b"hello from file",
+            )
+            allowed_upload = server.post_multipart(
+                "/api/ask",
+                fields={
+                    "message": "read this",
+                    "chatId": "attach-chat",
+                    "sessionId": "attach-session",
+                    "attachmentVerificationToken": verification["attachmentVerification"]["token"],
+                },
+                filename="note.txt",
+                content_type="text/plain",
+                content=b"hello from file",
+            )
+
+        self.assertEqual(blocked_captcha["status"], 403)
+        self.assertEqual(blocked_password["status"], 401)
+        self.assertTrue(verification["ok"])
+        self.assertEqual(blocked_upload["status"], 403)
+        self.assertEqual(allowed_upload["answer"], "Stored answer.")
+
 
 class run_account_server:
-    def __init__(self, generator_factory: Any = StaticAnswerGenerator) -> None:
+    def __init__(
+        self,
+        generator_factory: Any = StaticAnswerGenerator,
+        *,
+        captcha_site_key: str = "",
+        captcha_verifier: Any = None,
+    ) -> None:
         self.temp_dir = TemporaryDirectory()
         self.generator_factory = generator_factory
+        self.captcha_site_key = captcha_site_key
+        self.captcha_verifier = captcha_verifier
         self.server: ThreadingHTTPServer | None = None
         self.thread: threading.Thread | None = None
         self.base_url = ""
@@ -651,6 +744,8 @@ class run_account_server:
             static_dir=root,
             generator_factory=self.generator_factory,
             database_path=root / "learny-test.sqlite3",
+            captcha_site_key=self.captcha_site_key,
+            captcha_verifier=self.captcha_verifier,
         )
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(config))
         host, port = self.server.server_address
@@ -791,6 +886,62 @@ class run_account_server:
         )
         with self.opener.open(request, timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def post_multipart_status(
+        self,
+        path: str,
+        *,
+        fields: dict[str, str],
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ) -> dict[str, Any]:
+        boundary = "----LearnyAccountTestBoundary"
+        chunks: list[bytes] = []
+        for name, value in fields.items():
+            chunks.extend(
+                [
+                    f"--{boundary}\r\n".encode("utf-8"),
+                    f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8"),
+                    value.encode("utf-8"),
+                    b"\r\n",
+                ]
+            )
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                (
+                    'Content-Disposition: form-data; name="attachments"; '
+                    f'filename="{filename}"\r\n'
+                ).encode("utf-8"),
+                f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+                content,
+                b"\r\n",
+                f"--{boundary}--\r\n".encode("utf-8"),
+            ]
+        )
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=b"".join(chunks),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        try:
+            with self.opener.open(request, timeout=10) as response:
+                return {
+                    "status": int(response.status),
+                    "data": json.loads(response.read().decode("utf-8")),
+                    "headers": response.headers,
+                }
+        except urllib.error.HTTPError as error:
+            try:
+                return {
+                    "status": int(error.code),
+                    "data": json.loads(error.read().decode("utf-8")),
+                    "headers": error.headers,
+                }
+            finally:
+                error.close()
 
     def get_text(self, path: str) -> str:
         with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:

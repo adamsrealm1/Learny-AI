@@ -10,7 +10,10 @@ import mimetypes
 import os
 import re
 import secrets
+import threading
 import time
+import urllib.error
+import urllib.request
 import zipfile
 import zlib
 from dataclasses import dataclass
@@ -19,7 +22,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlencode, unquote, urlsplit
 from xml.etree import ElementTree
 
 from .bot import DEFAULT_FALLBACK, AnswerGenerator, Learny
@@ -75,6 +78,8 @@ ASK_MULTIPART_MAX_BYTES = (ATTACHMENT_LIMIT * ATTACHMENT_MAX_BYTES) + 512_000
 ATTACHMENT_TEXT_MAX_CHARS = 24_000
 ATTACHMENT_PROMPT_TOTAL_CHARS = 32_000
 ATTACHMENT_PROMPT_MIN_CHARS = 1_500
+ATTACHMENT_VERIFICATION_TTL_MS = 15 * 60 * 1000
+RECAPTCHA_VERIFY_URL = "https://www.google.com/recaptcha/api/siteverify"
 SUPPORTED_ATTACHMENT_EXTENSIONS = {
     "txt",
     "md",
@@ -97,6 +102,9 @@ class WebServerConfig:
     static_dir: Path
     generator_factory: Callable[[], AnswerGenerator | None]
     database_path: Path | None = None
+    captcha_site_key: str = ""
+    captcha_secret_key: str = ""
+    captcha_verifier: Callable[[str, str | None], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +123,80 @@ class AttachmentContext:
     size: int
     text: str
     truncated: bool
+
+
+class CaptchaService:
+    def __init__(
+        self,
+        *,
+        site_key: str = "",
+        secret_key: str = "",
+        verifier: Callable[[str, str | None], bool] | None = None,
+    ) -> None:
+        self.site_key = site_key.strip()
+        self.secret_key = secret_key.strip()
+        self._verifier = verifier
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.site_key and (self.secret_key or self._verifier))
+
+    def public_config(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "siteKey": self.site_key if self.enabled else "",
+        }
+
+    def verify(self, token: str | None, remote_ip: str | None = None) -> bool:
+        if not self.enabled:
+            return True
+        clean_token = str(token or "").strip()
+        if not clean_token:
+            return False
+        if self._verifier is not None:
+            try:
+                return bool(self._verifier(clean_token, remote_ip))
+            except Exception:
+                return False
+        return _verify_google_recaptcha(self.secret_key, clean_token, remote_ip)
+
+
+class AttachmentVerificationStore:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._tokens: dict[str, tuple[int, int]] = {}
+
+    def create(self, account_id: int) -> dict[str, Any]:
+        self._prune()
+        token = secrets.token_urlsafe(32)
+        expires_at = _now_ms() + ATTACHMENT_VERIFICATION_TTL_MS
+        with self._lock:
+            self._tokens[token] = (account_id, expires_at)
+        return {"token": token, "expiresAt": expires_at}
+
+    def verify(self, account_id: int, token: str | None) -> bool:
+        clean_token = str(token or "").strip()
+        if not clean_token:
+            return False
+        now = _now_ms()
+        with self._lock:
+            record = self._tokens.get(clean_token)
+            if record is None:
+                return False
+            stored_account_id, expires_at = record
+            if expires_at <= now:
+                self._tokens.pop(clean_token, None)
+                return False
+            return stored_account_id == account_id
+
+    def _prune(self) -> None:
+        now = _now_ms()
+        with self._lock:
+            expired_tokens = [
+                token for token, (_, expires_at) in self._tokens.items() if expires_at <= now
+            ]
+            for token in expired_tokens:
+                self._tokens.pop(token, None)
 
 
 class SessionStore:
@@ -140,6 +222,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
         config.database_path or _default_database_path(),
         prefer_wasmer_database=config.database_path is None,
     )
+    captcha = CaptchaService(
+        site_key=config.captcha_site_key,
+        secret_key=config.captcha_secret_key,
+        verifier=config.captcha_verifier,
+    )
+    attachment_verifications = AttachmentVerificationStore()
 
     class LearnyRequestHandler(BaseHTTPRequestHandler):
         server_version = "LearnyWeb/2.0"
@@ -157,6 +245,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 return
             if route == "/api/platform":
                 self._handle_platform()
+                return
+            if route == "/api/captcha/config":
+                self._handle_captcha_config()
                 return
             if route == "/api/admin/portal":
                 self._handle_admin_portal()
@@ -185,6 +276,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 return
             if route == "/api/account/profile-picture":
                 self._handle_profile_picture()
+                return
+            if route == "/api/attachments/verify":
+                self._handle_attachment_verification()
                 return
             if route == "/api/rate-limits/reset":
                 self._handle_reset_rate_limits()
@@ -287,6 +381,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 HTTPStatus.FORBIDDEN if ban else HTTPStatus.OK,
             )
 
+        def _handle_captcha_config(self) -> None:
+            self._send_json({"captcha": captcha.public_config()})
+
         def _handle_admin_portal(self) -> None:
             admin = self._require_admin_account()
             if admin is None:
@@ -298,6 +395,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 body = self._read_json_body()
                 username = _required_string(body, "username")
                 password = _required_string(body, "password")
+                if not self._verify_captcha_from_body(body):
+                    self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
+                    return
                 ban = self._ban_for(username=username)
                 if ban:
                     self._send_ban_response(ban)
@@ -324,6 +424,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 body = self._read_json_body()
                 username = _required_string(body, "username")
                 password = _required_string(body, "password")
+                if not self._verify_captcha_from_body(body):
+                    self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
+                    return
                 ban = self._ban_for(username=username)
                 if ban:
                     self._send_ban_response(ban)
@@ -357,11 +460,52 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if account is None:
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
                 return
+            try:
+                body = self._read_json_body()
+            except ValueError:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+            if not self._verify_captcha_from_body(body):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
+                return
 
             database.delete_account(int(account["id"]))
             self._send_json(
                 {"deleted": True, "authenticated": False, "account": None, "stats": None},
                 extra_headers=[_clear_account_cookie_header(self._needs_cross_site_cookie())],
+            )
+
+        def _handle_attachment_verification(self) -> None:
+            account = self._current_account()
+            if account is None:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+            ban = self._current_ban(account)
+            if ban:
+                self._send_ban_response(ban)
+                return
+            try:
+                body = self._read_json_body()
+                password = _required_string(body, "password")
+            except ValueError:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+            if not self._verify_captcha_from_body(body):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
+                return
+            if not database.verify_password(int(account["id"]), password):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+
+            verification = attachment_verifications.create(int(account["id"]))
+            self._send_json(
+                {
+                    "ok": True,
+                    "attachmentVerification": {
+                        "token": verification["token"],
+                        "expiresAt": verification["expiresAt"],
+                    },
+                }
             )
 
         def _handle_profile_picture(self) -> None:
@@ -555,6 +699,20 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if ban:
                 self._send_ban_response(ban)
                 return
+            if attachment_contexts:
+                if account is None:
+                    self._send_json(
+                        {"error": GENERIC_ERROR_MESSAGE, "retryable": False},
+                        HTTPStatus.UNAUTHORIZED,
+                    )
+                    return
+                verification_token = _optional_string(body, "attachmentVerificationToken")
+                if not attachment_verifications.verify(int(account["id"]), verification_token):
+                    self._send_json(
+                        {"error": GENERIC_ERROR_MESSAGE, "retryable": False},
+                        HTTPStatus.FORBIDDEN,
+                    )
+                    return
             platform = database.platform_state()
             if not platform.get("available", True):
                 self._send_json(
@@ -738,6 +896,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 HTTPStatus.FORBIDDEN,
             )
 
+        def _verify_captcha_from_body(self, body: dict[str, Any]) -> bool:
+            return captcha.verify(_optional_string(body, "captchaToken"), self._client_ip())
+
         def _client_ip(self) -> str:
             forwarded_for = self.headers.get("X-Forwarded-For", "")
             if forwarded_for:
@@ -884,6 +1045,8 @@ def main(argv: list[str] | None = None) -> int:
     config = WebServerConfig(
         static_dir=args.static.resolve(),
         generator_factory=GroqAnswerGenerator.from_env,
+        captcha_site_key=os.environ.get("RECAPTCHA_SITE_KEY", "").strip(),
+        captcha_secret_key=os.environ.get("RECAPTCHA_SECRET_KEY", "").strip(),
     )
     run_server(args.host, args.port, config)
     return 0
@@ -912,6 +1075,28 @@ def _default_database_path() -> Path:
     if Path("/data").exists():
         return Path("/data/learny.sqlite3")
     return DEFAULT_DATA_DIR / "learny.sqlite3"
+
+
+def _verify_google_recaptcha(secret_key: str, token: str, remote_ip: str | None) -> bool:
+    form_data: dict[str, str] = {
+        "secret": secret_key,
+        "response": token,
+    }
+    if remote_ip and remote_ip != "unknown":
+        form_data["remoteip"] = remote_ip
+
+    request = urllib.request.Request(
+        RECAPTCHA_VERIFY_URL,
+        data=urlencode(form_data).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=6) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        return False
+    return bool(isinstance(payload, dict) and payload.get("success") is True)
 
 
 def _safe_static_path(static_dir: Path, route: str) -> Path:

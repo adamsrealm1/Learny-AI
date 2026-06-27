@@ -23,7 +23,11 @@ const rateLimitPopupFill = document.querySelector("#rateLimitPopupFill");
 const rateLimitDescription = document.querySelector("#rateLimitDescription");
 const attachmentAuthModal = document.querySelector("#attachmentAuthModal");
 const attachmentAuthBackdrop = document.querySelector("#attachmentAuthBackdrop");
+const attachmentAuthClose = document.querySelector("#attachmentAuthClose");
+const attachmentAuthForm = document.querySelector("#attachmentAuthForm");
+const attachmentAuthPassword = document.querySelector("#attachmentAuthPassword");
 const attachmentAuthOk = document.querySelector("#attachmentAuthOk");
+const attachmentAuthMessage = document.querySelector("#attachmentAuthMessage");
 const emptyState = document.querySelector("#emptyState");
 const starField = document.querySelector("#starField");
 const appShell = document.querySelector(".app-shell");
@@ -74,6 +78,12 @@ const accountModalSubtitle = document.querySelector("#accountModalSubtitle");
 const accountModalViews = document.querySelectorAll("[data-account-view]");
 const signInForm = document.querySelector("#signInForm");
 const createAccountForm = document.querySelector("#createAccountForm");
+const signInSubmitButton = document.querySelector("#signInSubmitButton");
+const createAccountSubmitButton = document.querySelector("#createAccountSubmitButton");
+const signInCaptcha = document.querySelector("#signInCaptcha");
+const createAccountCaptcha = document.querySelector("#createAccountCaptcha");
+const deleteAccountCaptcha = document.querySelector("#deleteAccountCaptcha");
+const attachmentCaptcha = document.querySelector("#attachmentCaptcha");
 const signInMessage = document.querySelector("#signInMessage");
 const createAccountMessage = document.querySelector("#createAccountMessage");
 const accountAvatarImage = document.querySelector("#accountAvatarImage");
@@ -111,6 +121,7 @@ const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", 
 const ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024;
 const ATTACHMENT_LIMIT = 10;
 const ATTACHMENT_EXTENSIONS = new Set(["txt", "md", "log", "docx", "rtf", "pdf", "csv", "json", "xml"]);
+const RECAPTCHA_SCRIPT_ID = "learny-recaptcha-script";
 const COPY_RESET_DELAY_MS = 10000;
 const MESSAGE_DELETE_DURATION_MS = 850;
 const WORD_REVEAL_STEP_MS = 52;
@@ -246,6 +257,40 @@ let serverChatsLoaded = false;
 let serverSyncTimerId = null;
 let activeAccountView = "";
 let selectedAttachments = [];
+let captchaConfig = { enabled: false, siteKey: "" };
+let recaptchaScriptPromise = null;
+let attachmentVerificationToken = "";
+let attachmentVerificationExpiresAt = 0;
+const captchaControls = {
+  signIn: {
+    action: "sign-in",
+    element: signInCaptcha,
+    button: signInSubmitButton,
+    token: "",
+    widgetId: null,
+  },
+  createAccount: {
+    action: "create-account",
+    element: createAccountCaptcha,
+    button: createAccountSubmitButton,
+    token: "",
+    widgetId: null,
+  },
+  deleteAccount: {
+    action: "delete-account",
+    element: deleteAccountCaptcha,
+    button: accountDeleteConfirmButton,
+    token: "",
+    widgetId: null,
+  },
+  attachment: {
+    action: "attachment",
+    element: attachmentCaptcha,
+    button: attachmentAuthOk,
+    token: "",
+    widgetId: null,
+  },
+};
 const mobileSidebarMedia = window.matchMedia
   ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
   : null;
@@ -985,7 +1030,7 @@ function renderBanLock() {
     banLockDate.textContent = formatDateTime(currentBan.createdAt);
   }
   if (banLockReason) {
-    banLockReason.textContent = currentBan.reason || "Access was restricted by Learny moderation.";
+    banLockReason.textContent = currentBan.reason || "Access was blocked by Learny moderation.";
   }
 }
 
@@ -1169,16 +1214,211 @@ function closeRateLimitPopup() {
   }
 }
 
+function normalizeCaptchaConfig(config) {
+  if (!config || typeof config !== "object") {
+    return { enabled: false, siteKey: "" };
+  }
+  return {
+    enabled: Boolean(config.enabled && typeof config.siteKey === "string" && config.siteKey.trim()),
+    siteKey: typeof config.siteKey === "string" ? config.siteKey.trim() : "",
+  };
+}
+
+function isCaptchaEnabled() {
+  return Boolean(captchaConfig.enabled && captchaConfig.siteKey);
+}
+
+function loadRecaptchaScript() {
+  if (!isCaptchaEnabled()) {
+    return Promise.resolve();
+  }
+  if (window.grecaptcha && typeof window.grecaptcha.render === "function") {
+    return Promise.resolve();
+  }
+  if (recaptchaScriptPromise) {
+    return recaptchaScriptPromise;
+  }
+
+  recaptchaScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector(`#${RECAPTCHA_SCRIPT_ID}`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error(GENERIC_ERROR_MESSAGE)), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = RECAPTCHA_SCRIPT_ID;
+    script.src = "https://www.google.com/recaptcha/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.addEventListener("load", () => resolve(), { once: true });
+    script.addEventListener("error", () => reject(new Error(GENERIC_ERROR_MESSAGE)), { once: true });
+    document.head.append(script);
+  });
+  return recaptchaScriptPromise;
+}
+
+function captchaControl(name) {
+  return captchaControls[name] || null;
+}
+
+function setCaptchaToken(name, token) {
+  const control = captchaControl(name);
+  if (!control) {
+    return;
+  }
+  control.token = String(token || "");
+  syncCaptchaButtons();
+}
+
+function captchaToken(name) {
+  const control = captchaControl(name);
+  return control ? control.token : "";
+}
+
+function syncCaptchaButtons() {
+  Object.entries(captchaControls).forEach(([name, control]) => {
+    if (!control.button) {
+      return;
+    }
+    const requiresCaptcha = isCaptchaEnabled();
+    const missingCaptcha = requiresCaptcha && !control.token;
+    const missingAttachmentPassword =
+      name === "attachment" &&
+      attachmentAuthPassword &&
+      !String(attachmentAuthPassword.value || "").trim();
+    control.button.disabled = Boolean(missingCaptcha || missingAttachmentPassword);
+  });
+}
+
+async function renderCaptchaControl(name) {
+  const control = captchaControl(name);
+  if (!control || !control.element) {
+    return;
+  }
+  control.element.classList.toggle("captcha-disabled", !isCaptchaEnabled());
+  control.element.hidden = !isCaptchaEnabled();
+  if (!isCaptchaEnabled()) {
+    control.token = "";
+    syncCaptchaButtons();
+    return;
+  }
+  await loadRecaptchaScript();
+  if (!window.grecaptcha || typeof window.grecaptcha.render !== "function") {
+    throw new Error(GENERIC_ERROR_MESSAGE);
+  }
+  if (control.widgetId !== null) {
+    return;
+  }
+  control.widgetId = window.grecaptcha.render(control.element, {
+    sitekey: captchaConfig.siteKey,
+    theme: "dark",
+    callback: (token) => setCaptchaToken(name, token),
+    "expired-callback": () => setCaptchaToken(name, ""),
+    "error-callback": () => setCaptchaToken(name, ""),
+  });
+  syncCaptchaButtons();
+}
+
+function queueCaptchaRender(name) {
+  renderCaptchaControl(name).catch(() => {
+    resetCaptchaControl(name);
+  });
+}
+
+async function renderCaptchaControls() {
+  if (!isCaptchaEnabled()) {
+    Object.values(captchaControls).forEach((control) => {
+      if (control.element) {
+        control.element.hidden = true;
+      }
+      control.token = "";
+    });
+    syncCaptchaButtons();
+    return;
+  }
+  Object.values(captchaControls).forEach((control) => {
+    if (control.element) {
+      control.element.hidden = false;
+    }
+  });
+  syncCaptchaButtons();
+  try {
+    if (activeAccountView === "sign-in") {
+      await renderCaptchaControl("signIn");
+    } else if (activeAccountView === "create-account") {
+      await renderCaptchaControl("createAccount");
+    }
+    if (accountDeleteConfirm && !accountDeleteConfirm.hidden) {
+      await renderCaptchaControl("deleteAccount");
+    }
+    if (attachmentAuthModal && !attachmentAuthModal.hidden) {
+      await renderCaptchaControl("attachment");
+    }
+  } catch (error) {}
+}
+
+function resetCaptchaControl(name) {
+  const control = captchaControl(name);
+  if (!control) {
+    return;
+  }
+  control.token = "";
+  if (
+    isCaptchaEnabled() &&
+    control.widgetId !== null &&
+    window.grecaptcha &&
+    typeof window.grecaptcha.reset === "function"
+  ) {
+    window.grecaptcha.reset(control.widgetId);
+  }
+  syncCaptchaButtons();
+}
+
+function captchaPayload(name) {
+  return isCaptchaEnabled() ? { captchaToken: captchaToken(name) } : {};
+}
+
+async function loadCaptchaConfig() {
+  if (DIRECT_FILE_MODE) {
+    captchaConfig = { enabled: false, siteKey: "" };
+    syncCaptchaButtons();
+    return captchaConfig;
+  }
+  try {
+    const data = await apiFetch(
+      "/api/captcha/config",
+      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    captchaConfig = normalizeCaptchaConfig(data.captcha);
+  } catch (error) {
+    captchaConfig = { enabled: false, siteKey: "" };
+  }
+  await renderCaptchaControls();
+  return captchaConfig;
+}
+
 function openAttachmentAuthPopup() {
   if (!attachmentAuthModal) {
     return;
   }
 
+  if (attachmentAuthForm) {
+    attachmentAuthForm.reset();
+  }
+  if (attachmentAuthMessage) {
+    attachmentAuthMessage.textContent = "";
+    attachmentAuthMessage.classList.remove("error");
+  }
+  resetCaptchaControl("attachment");
   attachmentAuthModal.hidden = false;
   document.body.classList.add("attachment-auth-open");
+  queueCaptchaRender("attachment");
   window.setTimeout(() => {
-    if (attachmentAuthOk) {
-      attachmentAuthOk.focus();
+    if (attachmentAuthPassword) {
+      attachmentAuthPassword.focus();
     }
   }, 70);
 }
@@ -1190,8 +1430,101 @@ function closeAttachmentAuthPopup() {
 
   attachmentAuthModal.hidden = true;
   document.body.classList.remove("attachment-auth-open");
+  if (attachmentAuthForm) {
+    attachmentAuthForm.reset();
+  }
+  resetCaptchaControl("attachment");
   if (attachButton && !DIRECT_FILE_MODE) {
     attachButton.focus();
+  }
+}
+
+function attachmentVerificationIsValid() {
+  return Boolean(attachmentVerificationToken && Date.now() < attachmentVerificationExpiresAt);
+}
+
+function clearAttachmentVerification() {
+  attachmentVerificationToken = "";
+  attachmentVerificationExpiresAt = 0;
+}
+
+function setAttachmentAuthMessage(text = "", isError = false) {
+  if (!attachmentAuthMessage) {
+    return;
+  }
+  attachmentAuthMessage.textContent = text;
+  attachmentAuthMessage.classList.toggle("error", isError);
+}
+
+function setAttachmentAuthBusy(busy) {
+  if (!attachmentAuthForm) {
+    return;
+  }
+  attachmentAuthForm.querySelectorAll("input, button").forEach((field) => {
+    field.disabled = busy;
+  });
+  if (attachmentAuthOk) {
+    if (!attachmentAuthOk.dataset.originalText) {
+      attachmentAuthOk.dataset.originalText = attachmentAuthOk.textContent;
+    }
+    attachmentAuthOk.textContent = busy ? "Checking..." : attachmentAuthOk.dataset.originalText;
+  }
+}
+
+function openVerifiedFilePicker() {
+  if (!currentAccount) {
+    clearSelectedAttachments();
+    openAccountModal("sign-in");
+    return;
+  }
+  if (!attachmentVerificationIsValid()) {
+    openAttachmentAuthPopup();
+    return;
+  }
+  fileInput.click();
+}
+
+async function handleAttachmentAuthSubmit(event) {
+  event.preventDefault();
+  if (!currentAccount || !attachmentAuthForm) {
+    closeAttachmentAuthPopup();
+    openAccountModal("sign-in");
+    return;
+  }
+  const formData = new FormData(attachmentAuthForm);
+  const password = String(formData.get("password") || "");
+  if (!password || (isCaptchaEnabled() && !captchaToken("attachment"))) {
+    setAttachmentAuthMessage(GENERIC_ERROR_MESSAGE, true);
+    syncCaptchaButtons();
+    return;
+  }
+
+  setAttachmentAuthBusy(true);
+  setAttachmentAuthMessage();
+  try {
+    const data = await apiFetch(
+      "/api/attachments/verify",
+      {
+        method: "POST",
+        body: JSON.stringify({ password, ...captchaPayload("attachment") }),
+        timeoutMs: STATUS_FETCH_TIMEOUT_MS,
+      },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    if (!data.attachmentVerification || !data.attachmentVerification.token) {
+      throw new Error(GENERIC_ERROR_MESSAGE);
+    }
+    attachmentVerificationToken = data.attachmentVerification.token;
+    attachmentVerificationExpiresAt = Number(data.attachmentVerification.expiresAt) || 0;
+    closeAttachmentAuthPopup();
+    fileInput.click();
+  } catch (error) {
+    clearAttachmentVerification();
+    setAttachmentAuthMessage(GENERIC_ERROR_MESSAGE, true);
+    resetCaptchaControl("attachment");
+  } finally {
+    setAttachmentAuthBusy(false);
+    syncCaptchaButtons();
   }
 }
 
@@ -1345,7 +1678,7 @@ function renderAdminAccountRow(account, { compact = false } = {}) {
   if (account.ban) {
     const badge = document.createElement("span");
     badge.className = "admin-badge banned";
-    badge.textContent = "Restricted";
+    badge.textContent = "Banned";
     badges.append(badge);
   }
   copy.append(name, meta, badges);
@@ -1355,18 +1688,18 @@ function renderAdminAccountRow(account, { compact = false } = {}) {
     const actions = document.createElement("div");
     actions.className = "admin-row-actions";
     actions.append(
-      createAdminMiniAction(account.isAdmin ? "Revoke" : "Promote", () =>
+      createAdminMiniAction(account.isAdmin ? "Remove admin" : "Give admin", () =>
         submitAdminJson("/api/admin/role", {
           username: account.username,
           admin: !account.isAdmin,
         }),
       ),
-      createAdminMiniAction(account.ban ? "Unlock" : "Lock", () =>
+      createAdminMiniAction(account.ban ? "Unban" : "Ban", () =>
         submitAdminJson(
           account.ban ? "/api/admin/unban" : "/api/admin/ban",
           account.ban
             ? { kind: "username", target: account.username }
-            : { kind: "username", target: account.username, reason: "Restricted from the Admin Portal." },
+            : { kind: "username", target: account.username, reason: "Banned from the Admin Portal." },
         ),
       ),
       createAdminMiniAction("Delete", () =>
@@ -1414,7 +1747,7 @@ function renderAdminBanRow(ban) {
   const actions = document.createElement("div");
   actions.className = "admin-row-actions";
   actions.append(
-    createAdminMiniAction("Unlock", () =>
+    createAdminMiniAction("Unban", () =>
       submitAdminJson("/api/admin/unban", { kind: ban.kind, target: ban.target }),
     ),
   );
@@ -1436,7 +1769,7 @@ function renderAdminPortal(data = adminPortalData) {
   if (adminPortalSummary) {
     adminPortalSummary.textContent =
       `${accounts.length} ${pluralize(accounts.length, "account")} monitored, ` +
-      `${bans.length} active ${pluralize(bans.length, "restriction")}.`;
+      `${bans.length} active ${pluralize(bans.length, "ban")}.`;
   }
   if (adminAccountsCount) {
     adminAccountsCount.textContent = String(accounts.length);
@@ -1454,7 +1787,7 @@ function renderAdminPortal(data = adminPortalData) {
   renderAdminList(adminAdminsList, admins, "No admins yet", (account) =>
     renderAdminAccountRow(account, { compact: true }),
   );
-  renderAdminList(adminBansList, bans, "No active restrictions", renderAdminBanRow);
+  renderAdminList(adminBansList, bans, "No active bans", renderAdminBanRow);
 }
 
 function formatAccountDate(timestamp) {
@@ -1500,6 +1833,7 @@ function resetDeleteConfirmation() {
   if (accountDeleteConfirm) {
     accountDeleteConfirm.hidden = true;
   }
+  resetCaptchaControl("deleteAccount");
 }
 
 function renderAccountModalDetails() {
@@ -1564,6 +1898,16 @@ function showAccountView(view) {
     node.hidden = node.dataset.accountView !== nextView;
   });
   setAccountModalCopy(nextView);
+  if (nextView === "sign-in") {
+    resetCaptchaControl("createAccount");
+    queueCaptchaRender("signIn");
+  } else if (nextView === "create-account") {
+    resetCaptchaControl("signIn");
+    queueCaptchaRender("createAccount");
+  } else {
+    resetCaptchaControl("signIn");
+    resetCaptchaControl("createAccount");
+  }
   if (nextView === "myaccount") {
     renderAccountModalDetails();
   }
@@ -1631,6 +1975,7 @@ function clearSignedInLocalState() {
   currentAccount = null;
   currentAccountStats = null;
   serverChatsLoaded = false;
+  clearAttachmentVerification();
   chats = [];
   activeChatId = "";
   sessionId = "";
@@ -1818,11 +2163,16 @@ async function loadAccountAndChats() {
       currentAccount = null;
       currentAccountStats = null;
       serverChatsLoaded = false;
+      clearAttachmentVerification();
       updateAccountButton();
       return accountData;
     }
 
+    const previousUsername = currentAccount ? currentAccount.username : "";
     currentAccount = accountData.account;
+    if (previousUsername && previousUsername !== currentAccount.username) {
+      clearAttachmentVerification();
+    }
     currentAccountStats = accountData.stats || null;
     updateAccountButton();
 
@@ -1859,6 +2209,7 @@ async function loadAccountAndChats() {
     currentAccount = null;
     currentAccountStats = null;
     serverChatsLoaded = false;
+    clearAttachmentVerification();
     updateAccountButton();
     return null;
   }
@@ -2561,7 +2912,9 @@ function isApiResponseData(data) {
     "rateLimit" in data ||
     "platform" in data ||
     "ban" in data ||
-    "adminPortal" in data
+    "adminPortal" in data ||
+    "captcha" in data ||
+    "attachmentVerification" in data
   );
 }
 
@@ -2663,7 +3016,7 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
         responseError.status = response.status;
         responseError.data = data;
         responseError.retryable = data && typeof data === "object" ? data.retryable : undefined;
-        responseError.stopFallback = response.status === 429 || Boolean(data && data.ban);
+        responseError.stopFallback = [401, 403, 429].includes(response.status) || Boolean(data && data.ban);
         throw responseError;
       }
       if (!isApiResponseData(data)) {
@@ -2717,6 +3070,9 @@ function createAskRequestBody(message, chat, attachments) {
     formData.append("message", message);
     formData.append("sessionId", sessionId);
     formData.append("chatId", chat.id);
+    if (attachmentVerificationToken) {
+      formData.append("attachmentVerificationToken", attachmentVerificationToken);
+    }
     selectedFiles.forEach((attachment) => {
       if (attachment && attachment.file) {
         formData.append("attachments", attachment.file, attachment.file.name);
@@ -2852,7 +3208,7 @@ async function askLearny(message, { addUserMessage = true, attachments = [] } = 
   }
 }
 
-async function handleAccountAuthSubmit(form, messageNode, endpoint) {
+async function handleAccountAuthSubmit(form, messageNode, endpoint, captchaName) {
   if (!form) {
     return;
   }
@@ -2864,6 +3220,11 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint) {
     setAccountFormMessage(messageNode, GENERIC_ERROR_MESSAGE, true);
     return;
   }
+  if (isCaptchaEnabled() && !captchaToken(captchaName)) {
+    syncCaptchaButtons();
+    setAccountFormMessage(messageNode, GENERIC_ERROR_MESSAGE, true);
+    return;
+  }
 
   setAuthFormBusy(form, true);
   setAccountFormMessage(messageNode);
@@ -2872,7 +3233,7 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint) {
       endpoint,
       {
         method: "POST",
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, ...captchaPayload(captchaName) }),
         timeoutMs: STATUS_FETCH_TIMEOUT_MS,
       },
       activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
@@ -2882,6 +3243,7 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint) {
     }
     currentAccount = data.account;
     currentAccountStats = data.stats || null;
+    clearAttachmentVerification();
     form.reset();
     await loadAccountAndChats();
     await loadRateLimit();
@@ -2890,6 +3252,7 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint) {
     setAccountFormMessage(messageNode, GENERIC_ERROR_MESSAGE, true);
   } finally {
     setAuthFormBusy(form, false);
+    resetCaptchaControl(captchaName);
   }
 }
 
@@ -3012,6 +3375,10 @@ async function handleAccountDelete() {
   if (!accountDeleteConfirmButton) {
     return;
   }
+  if (isCaptchaEnabled() && !captchaToken("deleteAccount")) {
+    syncCaptchaButtons();
+    return;
+  }
 
   accountDeleteConfirmButton.disabled = true;
   accountDeleteConfirmButton.textContent = "Deleting...";
@@ -3020,7 +3387,7 @@ async function handleAccountDelete() {
       "/api/accounts/delete",
       {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ ...captchaPayload("deleteAccount") }),
         timeoutMs: STATUS_FETCH_TIMEOUT_MS,
       },
       activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
@@ -3035,6 +3402,7 @@ async function handleAccountDelete() {
   } catch (error) {} finally {
     accountDeleteConfirmButton.disabled = false;
     accountDeleteConfirmButton.textContent = "Delete forever";
+    resetCaptchaControl("deleteAccount");
   }
 }
 
@@ -3060,6 +3428,10 @@ chatForm.addEventListener("submit", (event) => {
   }
   if (!currentAccount && selectedAttachments.length > 0) {
     clearSelectedAttachments();
+    openAccountModal("sign-in");
+    return;
+  }
+  if (selectedAttachments.length > 0 && !attachmentVerificationIsValid()) {
     openAttachmentAuthPopup();
     return;
   }
@@ -3076,15 +3448,20 @@ if (attachButton && fileInput) {
     }
     if (!currentAccount) {
       clearSelectedAttachments();
-      openAttachmentAuthPopup();
+      openAccountModal("sign-in");
       return;
     }
-    fileInput.click();
+    openVerifiedFilePicker();
   });
 
   fileInput.addEventListener("change", (event) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
     if (!currentAccount) {
+      clearSelectedAttachments();
+      openAccountModal("sign-in");
+      return;
+    }
+    if (!attachmentVerificationIsValid()) {
       clearSelectedAttachments();
       openAttachmentAuthPopup();
       return;
@@ -3202,21 +3579,29 @@ if (attachmentAuthBackdrop) {
   attachmentAuthBackdrop.addEventListener("click", closeAttachmentAuthPopup);
 }
 
-if (attachmentAuthOk) {
-  attachmentAuthOk.addEventListener("click", closeAttachmentAuthPopup);
+if (attachmentAuthClose) {
+  attachmentAuthClose.addEventListener("click", closeAttachmentAuthPopup);
+}
+
+if (attachmentAuthPassword) {
+  attachmentAuthPassword.addEventListener("input", syncCaptchaButtons);
+}
+
+if (attachmentAuthForm) {
+  attachmentAuthForm.addEventListener("submit", handleAttachmentAuthSubmit);
 }
 
 if (signInForm) {
   signInForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    handleAccountAuthSubmit(signInForm, signInMessage, "/api/accounts/sign-in");
+    handleAccountAuthSubmit(signInForm, signInMessage, "/api/accounts/sign-in", "signIn");
   });
 }
 
 if (createAccountForm) {
   createAccountForm.addEventListener("submit", (event) => {
     event.preventDefault();
-    handleAccountAuthSubmit(createAccountForm, createAccountMessage, "/api/accounts/create");
+    handleAccountAuthSubmit(createAccountForm, createAccountMessage, "/api/accounts/create", "createAccount");
   });
 }
 
@@ -3236,6 +3621,8 @@ if (accountDeleteButton) {
   accountDeleteButton.addEventListener("click", () => {
     if (accountDeleteConfirm) {
       accountDeleteConfirm.hidden = false;
+      queueCaptchaRender("deleteAccount");
+      syncCaptchaButtons();
     }
   });
 }
@@ -3354,4 +3741,5 @@ if (DIRECT_FILE_MODE) {
 loadAccountAndChats();
 loadPlatformState();
 loadRateLimit();
+loadCaptchaConfig();
 releaseLoadingScreen();
