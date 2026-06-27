@@ -86,8 +86,7 @@ const MESSAGE_DELETE_DURATION_MS = 850;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
 const WORD_REVEAL_FOOTER_DELAY_MS = 850;
-const WELCOME_TEXTS = ["Hey! I'm Learny!", "What's on your mind?"];
-const WELCOME_LOCK_DELAY_MS = 2200;
+const WELCOME_TEXT = "What's on your mind?";
 const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
 const STATUS_FETCH_TIMEOUT_MS = 8000;
@@ -199,9 +198,6 @@ let chatSearchQuery = "";
 let messageSearchQuery = "";
 let messageSearchIndex = 0;
 let activeApiBase = "";
-let welcomeTextIndex = 0;
-let welcomeTimeoutId = null;
-let welcomeSequenceStarted = false;
 let currentAccount = null;
 let currentAccountStats = null;
 let currentRateLimit = { ...DEFAULT_RATE_LIMIT };
@@ -603,23 +599,12 @@ function renderWelcomeHeadingText(text) {
   welcomeHeading.replaceChildren(fragment);
 }
 
-function startWelcomeHeadingCycle() {
-  if (!welcomeHeading || welcomeSequenceStarted) {
+function showWelcomeHeading() {
+  if (!welcomeHeading) {
     return;
   }
 
-  welcomeSequenceStarted = true;
-  welcomeTextIndex = 0;
-  renderWelcomeHeadingText(WELCOME_TEXTS[0]);
-  if (WELCOME_TEXTS.length < 2) {
-    return;
-  }
-
-  welcomeTimeoutId = window.setTimeout(() => {
-    welcomeTextIndex = 1;
-    renderWelcomeHeadingText(WELCOME_TEXTS[welcomeTextIndex]);
-    welcomeTimeoutId = null;
-  }, WELCOME_LOCK_DELAY_MS);
+  renderWelcomeHeadingText(WELCOME_TEXT);
 }
 
 function clearSelectedAttachments() {
@@ -2796,7 +2781,7 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-startWelcomeHeadingCycle();
+showWelcomeHeading();
 createStarField();
 
 if (!getActiveChat() && chats.length > 0) {
