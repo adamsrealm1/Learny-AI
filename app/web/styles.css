@@ -773,20 +773,36 @@ body.account-modal-open {
 
 .captcha-slot {
   position: relative;
-  display: grid;
+  display: flex;
+  width: 304px;
+  max-width: 100%;
   min-height: 78px;
   align-items: center;
-  justify-items: start;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  overflow: visible;
+  line-height: 0;
+}
+
+.captcha-slot[data-captcha-state="loading"],
+.captcha-slot[data-captcha-state="error"] {
+  display: grid;
+  width: 100%;
+  justify-items: center;
   padding: 10px;
   border: 1px solid rgba(255, 255, 255, 0.095);
   border-radius: 16px;
   background: rgba(0, 0, 0, 0.18);
   overflow: hidden;
+  line-height: normal;
 }
 
-.captcha-slot[data-captcha-state="loading"],
-.captcha-slot[data-captcha-state="error"] {
-  justify-items: center;
+.captcha-slot > div,
+.captcha-slot iframe {
+  display: block;
 }
 
 .captcha-slot[data-captcha-state="loading"]::before,
@@ -814,7 +830,8 @@ body.account-modal-open {
   background: rgba(255, 70, 70, 0.1);
 }
 
-.captcha-slot.danger {
+.captcha-slot.danger[data-captcha-state="loading"],
+.captcha-slot.danger[data-captcha-state="error"] {
   border-color: rgba(255, 118, 118, 0.18);
   background: rgba(30, 0, 0, 0.14);
 }
