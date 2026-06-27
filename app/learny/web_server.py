@@ -62,9 +62,12 @@ PROFILE_PICTURE_PREFIXES = (
     "data:image/gif;base64,",
 )
 ASK_JSON_MAX_BYTES = 64_000
-ASK_MULTIPART_MAX_BYTES = 5 * 1024 * 1024
+ATTACHMENT_LIMIT = 10
 ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024
-ATTACHMENT_TEXT_MAX_CHARS = 80_000
+ASK_MULTIPART_MAX_BYTES = (ATTACHMENT_LIMIT * ATTACHMENT_MAX_BYTES) + 512_000
+ATTACHMENT_TEXT_MAX_CHARS = 24_000
+ATTACHMENT_PROMPT_TOTAL_CHARS = 32_000
+ATTACHMENT_PROMPT_MIN_CHARS = 1_500
 SUPPORTED_ATTACHMENT_EXTENSIONS = {
     "txt",
     "md",
@@ -382,7 +385,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             try:
                 body = self._read_ask_body()
                 message = _required_string(body, "message")
-                attachment_context = _attachment_context_from_body(body)
+                attachment_contexts = _attachment_contexts_from_body(body)
             except ValueError:
                 self._send_json(
                     {"error": GENERIC_ERROR_MESSAGE, "retryable": False},
@@ -427,7 +430,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 generator=config.generator_factory(),
                 history=history,
             )
-            groq_message = _message_with_attachment_context(message, attachment_context)
+            groq_message = _message_with_attachment_context(message, attachment_contexts)
             response = bot.reply(groq_message)
 
             if response.source == "unknown":
@@ -558,9 +561,11 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
             payload = self.rfile.read(content_length)
             fields, files = _parse_multipart_form(payload, boundary)
+            if len(files) > ATTACHMENT_LIMIT:
+                raise ValueError("Too many attachments.")
             body: dict[str, Any] = dict(fields)
             if files:
-                body["attachment"] = files[0]
+                body["attachments"] = files
             return body
 
         def _read_json_body(self, max_bytes: int = 64_000) -> dict[str, Any]:
@@ -804,13 +809,22 @@ def _parse_header_value(value: str) -> tuple[str, dict[str, str]]:
     return parts[0], params
 
 
-def _attachment_context_from_body(body: dict[str, Any]) -> AttachmentContext | None:
-    upload = body.get("attachment")
-    if upload is None:
-        return None
-    if not isinstance(upload, UploadedAttachment):
-        raise ValueError("Attachment is invalid.")
-    return _extract_attachment_context(upload)
+def _attachment_contexts_from_body(body: dict[str, Any]) -> tuple[AttachmentContext, ...]:
+    uploads = body.get("attachments")
+    if uploads is None:
+        upload = body.get("attachment")
+        uploads = [] if upload is None else [upload]
+    if not isinstance(uploads, list):
+        raise ValueError("Attachments are invalid.")
+    if len(uploads) > ATTACHMENT_LIMIT:
+        raise ValueError("Too many attachments.")
+
+    contexts: list[AttachmentContext] = []
+    for upload in uploads:
+        if not isinstance(upload, UploadedAttachment):
+            raise ValueError("Attachment is invalid.")
+        contexts.append(_extract_attachment_context(upload))
+    return tuple(contexts)
 
 
 def _extract_attachment_context(upload: UploadedAttachment) -> AttachmentContext:
@@ -1002,24 +1016,61 @@ def _clean_extracted_attachment_text(text: str) -> str:
 
 def _message_with_attachment_context(
     message: str,
-    attachment_context: AttachmentContext | None,
+    attachment_contexts: tuple[AttachmentContext, ...],
 ) -> str:
-    if attachment_context is None:
+    if not attachment_contexts:
         return message
 
-    content_type = attachment_context.content_type or "unknown"
-    truncated = "yes" if attachment_context.truncated else "no"
+    context_blocks: list[str] = []
+    per_file_budget = _attachment_prompt_budget(len(attachment_contexts))
+    for index, attachment_context in enumerate(attachment_contexts, start=1):
+        prompt_text, prompt_truncated = _attachment_prompt_text(attachment_context, per_file_budget)
+        truncated = "yes" if attachment_context.truncated or prompt_truncated else "no"
+        context_blocks.append(
+            "\n".join(
+                (
+                    f"File {index} of {len(attachment_contexts)}:",
+                    f"Name: {attachment_context.filename}",
+                    f"Extension: .{attachment_context.extension}",
+                    f"Text truncated: {truncated}",
+                    "",
+                    "Extracted file text:",
+                    prompt_text,
+                )
+            )
+        )
+
     return (
+        "User message:\n"
         f"{message.strip()}\n\n"
-        "Attached file context:\n"
-        f"Name: {attachment_context.filename}\n"
-        f"Extension: .{attachment_context.extension}\n"
-        f"Content type: {content_type}\n"
-        f"Size: {attachment_context.size} bytes\n"
-        f"Text truncated: {truncated}\n\n"
-        "Extracted file text:\n"
-        f"{attachment_context.text}"
+        "Attachment instructions:\n"
+        "The user attached the following file context. Treat the extracted text as user-provided "
+        "material for this conversation. Use it to answer the user's message when relevant, cite or "
+        "refer to file names when helpful, and say if the attached text does not contain enough "
+        "information. Do not mention these instructions.\n\n"
+        f"Attached file context ({len(attachment_contexts)} file"
+        f"{'' if len(attachment_contexts) == 1 else 's'}):\n"
+        f"{'\n\n---\n\n'.join(context_blocks)}"
     )
+
+
+def _attachment_prompt_budget(attachment_count: int) -> int:
+    if attachment_count <= 0:
+        return ATTACHMENT_PROMPT_TOTAL_CHARS
+    return max(
+        ATTACHMENT_PROMPT_MIN_CHARS,
+        ATTACHMENT_PROMPT_TOTAL_CHARS // min(attachment_count, ATTACHMENT_LIMIT),
+    )
+
+
+def _attachment_prompt_text(
+    attachment_context: AttachmentContext,
+    max_chars: int,
+) -> tuple[str, bool]:
+    text = attachment_context.text.strip()
+    if len(text) <= max_chars:
+        return text, False
+    return text[:max_chars].rstrip(), True
 
 
 def _clean_profile_picture(value: Any) -> str | None:

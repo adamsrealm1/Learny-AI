@@ -76,6 +76,7 @@ const PROFILE_ICON_PATH = appAssetPath("icon_library/profile.png");
 const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024;
+const ATTACHMENT_LIMIT = 10;
 const ATTACHMENT_EXTENSIONS = new Set(["txt", "md", "log", "docx", "rtf", "pdf", "csv", "json", "xml"]);
 const COPY_RESET_DELAY_MS = 10000;
 const MESSAGE_DELETE_DURATION_MS = 850;
@@ -159,6 +160,18 @@ function normalizeAttachmentMeta(attachment) {
   };
 }
 
+function normalizeAttachmentMetas(message) {
+  const rawAttachments = Array.isArray(message && message.attachments)
+    ? message.attachments
+    : message && message.attachment
+      ? [message.attachment]
+      : [];
+  return rawAttachments
+    .map((attachment) => normalizeAttachmentMeta(attachment))
+    .filter(Boolean)
+    .slice(0, ATTACHMENT_LIMIT);
+}
+
 function attachmentMetaFromFile(file) {
   if (!file) {
     return null;
@@ -195,7 +208,7 @@ let rateLimitPopupTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
 let activeAccountView = "";
-let selectedAttachment = null;
+let selectedAttachments = [];
 const mobileSidebarMedia = window.matchMedia
   ? window.matchMedia(MOBILE_SIDEBAR_QUERY)
   : null;
@@ -611,23 +624,40 @@ function startWelcomeHeadingCycle() {
   }, WELCOME_LOCK_DELAY_MS);
 }
 
-function clearSelectedAttachment() {
-  selectedAttachment = null;
+function clearSelectedAttachments() {
+  selectedAttachments = [];
   if (fileInput) {
     fileInput.value = "";
   }
   renderAttachmentTray();
 }
 
-function setSelectedAttachment(file) {
-  if (!isAllowedAttachmentFile(file)) {
-    clearSelectedAttachment();
+function addSelectedAttachments(files) {
+  const nextAttachments = [...selectedAttachments];
+  for (const file of files) {
+    if (nextAttachments.length >= ATTACHMENT_LIMIT) {
+      break;
+    }
+    if (!isAllowedAttachmentFile(file)) {
+      continue;
+    }
+    nextAttachments.push({
+      file,
+      meta: attachmentMetaFromFile(file),
+    });
+  }
+  selectedAttachments = nextAttachments;
+  if (fileInput) {
+    fileInput.value = "";
+  }
+  renderAttachmentTray();
+}
+
+function removeSelectedAttachment(index) {
+  if (!Number.isInteger(index) || index < 0 || index >= selectedAttachments.length) {
     return;
   }
-  selectedAttachment = {
-    file,
-    meta: attachmentMetaFromFile(file),
-  };
+  selectedAttachments = selectedAttachments.filter((_, attachmentIndex) => attachmentIndex !== index);
   renderAttachmentTray();
 }
 
@@ -638,52 +668,58 @@ function renderAttachmentTray() {
 
   const composer = chatForm;
   if (composer) {
-    composer.classList.toggle("has-attachment", Boolean(selectedAttachment));
+    composer.classList.toggle("has-attachment", selectedAttachments.length > 0);
   }
 
   attachmentTray.replaceChildren();
-  if (!selectedAttachment || !selectedAttachment.meta) {
+  if (selectedAttachments.length === 0) {
     attachmentTray.hidden = true;
     return;
   }
 
-  const { name, extension, size } = selectedAttachment.meta;
-  const card = document.createElement("div");
-  card.className = "attachment-card";
+  selectedAttachments.forEach((attachment, index) => {
+    if (!attachment || !attachment.meta) {
+      return;
+    }
 
-  const icon = document.createElement("span");
-  icon.className = "attachment-file-icon";
-  icon.textContent = extension || "file";
+    const { name, extension, size } = attachment.meta;
+    const card = document.createElement("div");
+    card.className = "attachment-card";
 
-  const info = document.createElement("span");
-  info.className = "attachment-info";
+    const icon = document.createElement("span");
+    icon.className = "attachment-file-icon";
+    icon.textContent = extension || "file";
 
-  const filename = document.createElement("strong");
-  filename.className = "attachment-name";
-  filename.textContent = name;
+    const info = document.createElement("span");
+    info.className = "attachment-info";
 
-  const meta = document.createElement("small");
-  meta.className = "attachment-meta";
-  meta.textContent = `${extension.toUpperCase()} document - ${formatFileSize(size)}`;
+    const filename = document.createElement("strong");
+    filename.className = "attachment-name";
+    filename.textContent = name;
 
-  info.append(filename, meta);
+    const meta = document.createElement("small");
+    meta.className = "attachment-meta";
+    meta.textContent = `${extension.toUpperCase()} document - ${formatFileSize(size)}`;
 
-  const removeButton = document.createElement("button");
-  removeButton.className = "attachment-remove";
-  removeButton.type = "button";
-  removeButton.title = "Remove attachment";
-  removeButton.setAttribute("aria-label", "Remove attachment");
+    info.append(filename, meta);
 
-  const removeIcon = document.createElement("img");
-  removeIcon.className = "ui-icon x-icon";
-  removeIcon.src = X_ICON_PATH;
-  removeIcon.alt = "";
-  removeIcon.setAttribute("aria-hidden", "true");
-  removeButton.append(removeIcon);
-  removeButton.addEventListener("click", clearSelectedAttachment);
+    const removeButton = document.createElement("button");
+    removeButton.className = "attachment-remove";
+    removeButton.type = "button";
+    removeButton.title = "Remove attachment";
+    removeButton.setAttribute("aria-label", `Remove ${name}`);
 
-  card.append(icon, info, removeButton);
-  attachmentTray.append(card);
+    const removeIcon = document.createElement("img");
+    removeIcon.className = "ui-icon x-icon";
+    removeIcon.src = X_ICON_PATH;
+    removeIcon.alt = "";
+    removeIcon.setAttribute("aria-hidden", "true");
+    removeButton.append(removeIcon);
+    removeButton.addEventListener("click", () => removeSelectedAttachment(index));
+
+    card.append(icon, info, removeButton);
+    attachmentTray.append(card);
+  });
   attachmentTray.hidden = false;
 }
 
@@ -776,7 +812,7 @@ function loadStoredChats() {
                 speaker: message.speaker,
                 text: sanitizeStoredMessageText(message),
                 source: sanitizeStoredMessageSource(message),
-                attachment: normalizeAttachmentMeta(message.attachment),
+                attachments: normalizeAttachmentMetas(message),
                 thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
                 createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
               }))
@@ -1286,7 +1322,7 @@ function normalizeServerChats(serverChats) {
               speaker: message.speaker,
               text: sanitizeStoredMessageText(message),
               source: sanitizeStoredMessageSource(message),
-              attachment: normalizeAttachmentMeta(message.attachment),
+              attachments: normalizeAttachmentMetas(message),
               thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
               createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
             }))
@@ -1409,8 +1445,7 @@ function chatMatchesSearch(chat, query) {
     chat.title,
     ...chat.messages.map((message) => message.text),
     ...chat.messages
-      .map((message) => normalizeAttachmentMeta(message.attachment))
-      .filter(Boolean)
+      .flatMap((message) => normalizeAttachmentMetas(message))
       .map((attachment) => attachment.name),
   ]
     .join(" ")
@@ -1845,7 +1880,7 @@ function createMessageAttachment(attachment) {
 }
 
 function displayMessage(
-  { speaker, text, source = "", thoughtSeconds = null, attachment = null },
+  { speaker, text, source = "", thoughtSeconds = null, attachments = [], attachment = null },
   {
     animateWords: shouldAnimateWords = false,
     messageIndex = null,
@@ -1859,8 +1894,10 @@ function displayMessage(
   if (Number.isInteger(messageIndex)) {
     node.dataset.messageIndex = String(messageIndex);
   }
-  const attachmentMeta = normalizeAttachmentMeta(attachment);
-  node.dataset.searchText = `${speaker} ${source} ${text} ${attachmentMeta ? attachmentMeta.name : ""}`.toLowerCase();
+  const attachmentMetas = normalizeAttachmentMetas({ attachments, attachment });
+  node.dataset.searchText = `${speaker} ${source} ${text} ${attachmentMetas
+    .map((meta) => meta.name)
+    .join(" ")}`.toLowerCase();
   node.querySelector(".speaker").textContent = speaker;
   node.querySelector(".source").textContent = source === "error" ? "" : source;
   const bubble = node.querySelector(".bubble");
@@ -1879,10 +1916,14 @@ function displayMessage(
       node.classList.add("reveal-complete");
     }, revealDuration + WORD_REVEAL_FOOTER_DELAY_MS);
   }
-  const attachmentNode = speaker === "You" ? createMessageAttachment(attachmentMeta) : null;
   bubble.replaceChildren(textNode);
-  if (attachmentNode) {
-    bubble.append(attachmentNode);
+  if (speaker === "You") {
+    attachmentMetas.forEach((attachmentMeta) => {
+      const attachmentNode = createMessageAttachment(attachmentMeta);
+      if (attachmentNode) {
+        bubble.append(attachmentNode);
+      }
+    });
   }
 
   if (speaker === "Learny") {
@@ -2035,7 +2076,7 @@ function resetChat() {
   if (attachButton) {
     attachButton.disabled = false;
   }
-  clearSelectedAttachment();
+  clearSelectedAttachments();
 }
 
 function addTyping() {
@@ -2206,20 +2247,25 @@ async function loadRateLimit() {
   }
 }
 
-function createAskRequestBody(message, chat, attachment) {
-  if (attachment && attachment.file) {
+function createAskRequestBody(message, chat, attachments) {
+  const selectedFiles = Array.isArray(attachments) ? attachments : [];
+  if (selectedFiles.length > 0) {
     const formData = new FormData();
     formData.append("message", message);
     formData.append("sessionId", sessionId);
     formData.append("chatId", chat.id);
-    formData.append("attachment", attachment.file, attachment.file.name);
+    selectedFiles.forEach((attachment) => {
+      if (attachment && attachment.file) {
+        formData.append("attachments", attachment.file, attachment.file.name);
+      }
+    });
     return formData;
   }
 
   return JSON.stringify({ message, sessionId, chatId: chat.id });
 }
 
-async function askLearny(message, { addUserMessage = true, attachment = null } = {}) {
+async function askLearny(message, { addUserMessage = true, attachments = [] } = {}) {
   if (DIRECT_FILE_MODE) {
     return;
   }
@@ -2237,7 +2283,7 @@ async function askLearny(message, { addUserMessage = true, attachment = null } =
       speaker: "You",
       text: message,
       source: "sent",
-      attachment: attachment ? attachment.meta : null,
+      attachments: attachments.map((attachment) => attachment.meta).filter(Boolean),
     });
   }
 
@@ -2259,7 +2305,7 @@ async function askLearny(message, { addUserMessage = true, attachment = null } =
           "/api/ask",
           {
             method: "POST",
-            body: createAskRequestBody(message, chat, attachment),
+            body: createAskRequestBody(message, chat, attachments),
             timeoutMs: ASK_REQUEST_TIMEOUT_MS,
           },
           activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
@@ -2531,10 +2577,10 @@ chatForm.addEventListener("submit", (event) => {
     openRateLimitPopup();
     return;
   }
-  const attachment = selectedAttachment;
+  const attachments = [...selectedAttachments];
   messageInput.value = "";
-  clearSelectedAttachment();
-  askLearny(message, { attachment });
+  clearSelectedAttachments();
+  askLearny(message, { attachments });
 });
 
 if (attachButton && fileInput) {
@@ -2546,12 +2592,11 @@ if (attachButton && fileInput) {
   });
 
   fileInput.addEventListener("change", (event) => {
-    const file = event.target.files && event.target.files[0];
-    if (!file) {
-      clearSelectedAttachment();
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    if (files.length === 0) {
       return;
     }
-    setSelectedAttachment(file);
+    addSelectedAttachments(files);
     messageInput.focus();
   });
 }

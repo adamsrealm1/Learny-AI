@@ -14,6 +14,7 @@ from typing import Any
 from learny.conversation import ConversationHistory
 from learny.groq_client import (
     DEFAULT_GROQ_MODELS,
+    DEFAULT_GROQ_MAX_COMPLETION_TOKENS,
     DEFAULT_GROQ_TIMEOUT_SECONDS,
     FALLBACK_GROQ_MODEL,
     PRIMARY_GROQ_MODEL,
@@ -27,6 +28,7 @@ from learny.groq_client import (
 from learny.web_server import (
     UploadedAttachment,
     WebServerConfig,
+    _message_with_attachment_context,
     _extract_attachment_context,
     create_handler,
 )
@@ -162,6 +164,7 @@ class LearnyGroqOnlyTests(unittest.TestCase):
                 {"role": "user", "content": "hello"},
             ],
         )
+        self.assertEqual(transport.payload["max_completion_tokens"], DEFAULT_GROQ_MAX_COMPLETION_TOKENS)
 
     def test_reasoning_tags_are_removed_from_visible_answer(self) -> None:
         answer = parse_generated_answer("hello", "<think>private notes</think>Hi there.")
@@ -234,10 +237,76 @@ class LearnyGroqOnlyTests(unittest.TestCase):
 
         self.assertEqual(data["answer"], "I read the attachment.")
         self.assertEqual(len(generator.questions), 1)
+        self.assertIn("User message:\nSummarize this file", generator.questions[0])
+        self.assertIn("Attachment instructions:", generator.questions[0])
+        self.assertIn("Use it to answer the user's message when relevant", generator.questions[0])
         self.assertIn("Summarize this file", generator.questions[0])
         self.assertIn("Name: notes.md", generator.questions[0])
         self.assertIn("Extension: .md", generator.questions[0])
         self.assertIn("Learny should see this text.", generator.questions[0])
+
+    def test_up_to_ten_multipart_attachments_are_sent_to_generator(self) -> None:
+        generator = CapturingAnswerGenerator()
+        files = [
+            (f"note-{index}.txt", "text/plain", f"File {index} text".encode("utf-8"))
+            for index in range(10)
+        ]
+        with run_test_server(lambda: generator) as base_url:
+            data = post_multipart_files(
+                base_url,
+                "/api/ask",
+                fields={"message": "Compare these files", "sessionId": "session-test"},
+                files=files,
+            )
+
+        self.assertEqual(data["answer"], "I read the attachment.")
+        self.assertEqual(len(generator.questions), 1)
+        self.assertIn("Attached file context (10 files):", generator.questions[0])
+        self.assertIn("File 1 of 10:", generator.questions[0])
+        self.assertIn("Name: note-0.txt", generator.questions[0])
+        self.assertIn("File 10 of 10:", generator.questions[0])
+        self.assertIn("Name: note-9.txt", generator.questions[0])
+        self.assertIn("File 9 text", generator.questions[0])
+
+    def test_more_than_ten_multipart_attachments_are_rejected(self) -> None:
+        files = [
+            (f"note-{index}.txt", "text/plain", f"File {index} text".encode("utf-8"))
+            for index in range(11)
+        ]
+        with run_test_server(StaticAnswerGenerator) as base_url:
+            with self.assertRaises(urllib.error.HTTPError) as raised:
+                post_multipart_files(
+                    base_url,
+                    "/api/ask",
+                    fields={"message": "Compare these files", "sessionId": "session-test"},
+                    files=files,
+                )
+
+        self.assertEqual(raised.exception.code, 400)
+        raised.exception.close()
+
+    def test_attachment_prompt_context_is_bounded_for_speed(self) -> None:
+        contexts = tuple(
+            _extract_attachment_context(
+                UploadedAttachment(
+                    field_name="attachments",
+                    filename=f"large-{index}.txt",
+                    content_type="text/plain",
+                    data=(f"File {index} " + ("x" * 50_000)).encode("utf-8"),
+                )
+            )
+            for index in range(10)
+        )
+
+        prompt = _message_with_attachment_context("Summarize quickly", contexts)
+
+        self.assertIn("Attachment instructions:", prompt)
+        self.assertIn("Treat the extracted text as user-provided material", prompt)
+        self.assertIn("Attached file context (10 files):", prompt)
+        self.assertIn("Name: large-0.txt", prompt)
+        self.assertIn("Name: large-9.txt", prompt)
+        self.assertLess(len(prompt), 40_000)
+        self.assertEqual(prompt.count("Text truncated: yes"), 10)
 
     def test_attachment_extractors_cover_supported_document_formats(self) -> None:
         docx_buffer = BytesIO()
@@ -351,6 +420,21 @@ def post_multipart(
     content_type: str,
     content: bytes,
 ) -> dict[str, Any]:
+    return post_multipart_files(
+        base_url,
+        path,
+        fields=fields,
+        files=[(filename, content_type, content)],
+    )
+
+
+def post_multipart_files(
+    base_url: str,
+    path: str,
+    *,
+    fields: dict[str, str],
+    files: list[tuple[str, str, bytes]],
+) -> dict[str, Any]:
     boundary = "----LearnyTestBoundary"
     chunks: list[bytes] = []
     for name, value in fields.items():
@@ -362,19 +446,20 @@ def post_multipart(
                 b"\r\n",
             ]
         )
-    chunks.extend(
-        [
-            f"--{boundary}\r\n".encode("utf-8"),
-            (
-                'Content-Disposition: form-data; name="attachment"; '
-                f'filename="{filename}"\r\n'
-            ).encode("utf-8"),
-            f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
-            content,
-            b"\r\n",
-            f"--{boundary}--\r\n".encode("utf-8"),
-        ]
-    )
+    for filename, content_type, content in files:
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                (
+                    'Content-Disposition: form-data; name="attachments"; '
+                    f'filename="{filename}"\r\n'
+                ).encode("utf-8"),
+                f"Content-Type: {content_type}\r\n\r\n".encode("utf-8"),
+                content,
+                b"\r\n",
+            ]
+        )
+    chunks.append(f"--{boundary}--\r\n".encode("utf-8"))
     body = b"".join(chunks)
     request = urllib.request.Request(
         f"{base_url}{path}",

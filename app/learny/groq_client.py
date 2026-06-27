@@ -24,6 +24,7 @@ DEFAULT_GROQ_MODELS = (
 )
 GROQ_USER_AGENT = "LearnyAI/0.2 (+https://learny.env.pm)"
 DEFAULT_GROQ_TIMEOUT_SECONDS = 12.0
+DEFAULT_GROQ_MAX_COMPLETION_TOKENS = 2000
 META_ANSWER_MARKERS = (
     "current user question",
     "previous conversation",
@@ -135,7 +136,7 @@ class GroqAnswerGenerator:
             "model": model,
             "messages": build_messages(question, history),
             "temperature": 0.35,
-            "max_completion_tokens": 9000,
+            "max_completion_tokens": DEFAULT_GROQ_MAX_COMPLETION_TOKENS,
         }
         content = self.transport.send_chat_completion(payload, self.timeout)
         answer = parse_generated_answer(question, content)
