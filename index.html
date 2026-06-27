@@ -191,6 +191,14 @@
           </span>
         </button>
 
+        <button class="admin-nav-button" id="adminButton" type="button" hidden>
+          <span class="admin-nav-mark" aria-hidden="true">A</span>
+          <span>
+            <strong>Admin Portal</strong>
+            <small>Operator controls</small>
+          </span>
+        </button>
+
         <section class="chats-panel" aria-label="Saved chats">
           <div class="panel-heading">
             <p>CHATS</p>
@@ -243,6 +251,10 @@
             >
             <span class="message-search-count" id="messageSearchCount" aria-live="polite"></span>
           </label>
+          <div class="admin-top-title" id="adminTopTitle" hidden>
+            <span>Admin Portal</span>
+            <strong>Control Center</strong>
+          </div>
         </header>
 
         <section class="chat-panel" aria-label="Learny chat">
@@ -283,7 +295,140 @@
 
           </div>
         </section>
+
+        <section class="admin-portal" id="adminPortal" aria-label="Admin Portal" hidden>
+          <div class="admin-portal-scroll">
+            <header class="admin-hero">
+              <div>
+                <p>Admin Portal</p>
+                <h1>Control Center</h1>
+                <span id="adminPortalSummary">No live data yet.</span>
+              </div>
+              <div class="admin-hero-actions">
+                <span class="admin-status-pill" id="adminAvailabilityPill">Checking</span>
+                <button class="admin-soft-button" id="adminRefreshButton" type="button">Refresh</button>
+              </div>
+            </header>
+
+            <section class="admin-panel admin-availability-panel">
+              <div>
+                <p class="admin-panel-kicker">System Access</p>
+                <h2>Learny availability</h2>
+                <span id="adminAvailabilityText">Learny is accepting messages.</span>
+              </div>
+              <label class="admin-switch">
+                <input id="adminAvailabilityToggle" type="checkbox">
+                <span aria-hidden="true"></span>
+                <strong id="adminAvailabilityLabel">Available</strong>
+              </label>
+            </section>
+
+            <div class="admin-dashboard-grid">
+              <section class="admin-panel">
+                <div class="admin-panel-heading">
+                  <div>
+                    <p class="admin-panel-kicker">Accounts</p>
+                    <h2>People</h2>
+                  </div>
+                  <span id="adminAccountsCount">0</span>
+                </div>
+                <div class="admin-list" id="adminAccountsList"></div>
+              </section>
+
+              <section class="admin-panel">
+                <div class="admin-panel-heading">
+                  <div>
+                    <p class="admin-panel-kicker">Admins</p>
+                    <h2>Operators</h2>
+                  </div>
+                  <span id="adminAdminsCount">0</span>
+                </div>
+                <div class="admin-list compact" id="adminAdminsList"></div>
+              </section>
+            </div>
+
+            <section class="admin-panel">
+              <div class="admin-panel-heading">
+                <div>
+                  <p class="admin-panel-kicker">Moderation</p>
+                  <h2>Active restrictions</h2>
+                </div>
+                <span id="adminBansCount">0</span>
+              </div>
+              <div class="admin-ban-list" id="adminBansList"></div>
+            </section>
+
+            <section class="admin-actions-shell">
+              <form class="admin-action-card" id="adminBanUsernameForm">
+                <h3>Lock username</h3>
+                <input name="username" type="text" placeholder="Username" autocomplete="off" required>
+                <textarea name="reason" placeholder="Reason" rows="3"></textarea>
+                <button type="submit">Restrict user</button>
+              </form>
+
+              <form class="admin-action-card" id="adminUnbanUsernameForm">
+                <h3>Unlock username</h3>
+                <input name="username" type="text" placeholder="Username" autocomplete="off" required>
+                <button type="submit">Restore access</button>
+              </form>
+
+              <form class="admin-action-card" id="adminBanIpForm">
+                <h3>Lock IP</h3>
+                <input name="ip" type="text" placeholder="IP address" autocomplete="off" required>
+                <textarea name="reason" placeholder="Reason" rows="3"></textarea>
+                <button type="submit">Restrict network</button>
+              </form>
+
+              <form class="admin-action-card" id="adminUnbanIpForm">
+                <h3>Unlock IP</h3>
+                <input name="ip" type="text" placeholder="IP address" autocomplete="off" required>
+                <button type="submit">Restore network</button>
+              </form>
+
+              <form class="admin-action-card danger" id="adminDeleteAccountForm">
+                <h3>Delete account</h3>
+                <input name="username" type="text" placeholder="Username" autocomplete="off" required>
+                <button type="submit">Delete profile</button>
+              </form>
+
+              <form class="admin-action-card" id="adminGrantForm">
+                <h3>Promote admin</h3>
+                <input name="username" type="text" placeholder="Username" autocomplete="off" required>
+                <button type="submit">Give portal access</button>
+              </form>
+
+              <form class="admin-action-card danger" id="adminRevokeForm">
+                <h3>Remove admin</h3>
+                <input name="username" type="text" placeholder="Username" autocomplete="off" required>
+                <button type="submit">Remove access</button>
+              </form>
+            </section>
+
+            <p class="admin-status-message" id="adminStatusMessage" aria-live="polite"></p>
+          </div>
+        </section>
       </main>
+    </div>
+
+    <div class="ban-lock" id="banLock" hidden>
+      <section class="ban-lock-card" role="alert" aria-live="assertive">
+        <p class="ban-lock-kicker">Access restricted</p>
+        <h1>Learny AI is locked for this session.</h1>
+        <dl>
+          <div>
+            <dt>Identity</dt>
+            <dd id="banLockTarget">Unknown</dd>
+          </div>
+          <div>
+            <dt>Date</dt>
+            <dd id="banLockDate">Unknown</dd>
+          </div>
+          <div>
+            <dt>Reason</dt>
+            <dd id="banLockReason">Access was restricted by Learny moderation.</dd>
+          </div>
+        </dl>
+      </section>
     </div>
 
     <div class="account-modal" id="accountModal" hidden>
@@ -452,6 +597,6 @@
     </template>
 
     <script src="./app/web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./app/web/app.js?v=mobilepolish1" defer></script>
+    <script src="./app/web/app.js?v=welcome-clean1" defer></script>
   </body>
 </html>

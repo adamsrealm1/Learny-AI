@@ -27,15 +27,45 @@ const attachmentAuthOk = document.querySelector("#attachmentAuthOk");
 const emptyState = document.querySelector("#emptyState");
 const starField = document.querySelector("#starField");
 const appShell = document.querySelector(".app-shell");
+const mainArea = document.querySelector(".main-area");
+const chatPanel = document.querySelector(".chat-panel");
 const sidebarToggle = document.querySelector(".sidebar-toggle");
 const mobileSidebarButton = document.querySelector("#mobileSidebarButton");
 const sidebarScrim = document.querySelector("#sidebarScrim");
 const messageSearchInput = document.querySelector("#messageSearchInput");
 const messageSearchCount = document.querySelector("#messageSearchCount");
+const messageSearch = document.querySelector(".message-search");
 const welcomeHeading = document.querySelector("#welcomeHeading");
 const accountButton = document.querySelector("#accountButton");
 const accountStatusText = document.querySelector("#accountStatusText");
 const accountOrbImage = document.querySelector("#accountOrbImage");
+const adminButton = document.querySelector("#adminButton");
+const adminTopTitle = document.querySelector("#adminTopTitle");
+const adminPortal = document.querySelector("#adminPortal");
+const adminPortalSummary = document.querySelector("#adminPortalSummary");
+const adminAvailabilityPill = document.querySelector("#adminAvailabilityPill");
+const adminAvailabilityText = document.querySelector("#adminAvailabilityText");
+const adminAvailabilityToggle = document.querySelector("#adminAvailabilityToggle");
+const adminAvailabilityLabel = document.querySelector("#adminAvailabilityLabel");
+const adminAccountsCount = document.querySelector("#adminAccountsCount");
+const adminAdminsCount = document.querySelector("#adminAdminsCount");
+const adminBansCount = document.querySelector("#adminBansCount");
+const adminAccountsList = document.querySelector("#adminAccountsList");
+const adminAdminsList = document.querySelector("#adminAdminsList");
+const adminBansList = document.querySelector("#adminBansList");
+const adminRefreshButton = document.querySelector("#adminRefreshButton");
+const adminStatusMessage = document.querySelector("#adminStatusMessage");
+const adminBanUsernameForm = document.querySelector("#adminBanUsernameForm");
+const adminUnbanUsernameForm = document.querySelector("#adminUnbanUsernameForm");
+const adminBanIpForm = document.querySelector("#adminBanIpForm");
+const adminUnbanIpForm = document.querySelector("#adminUnbanIpForm");
+const adminDeleteAccountForm = document.querySelector("#adminDeleteAccountForm");
+const adminGrantForm = document.querySelector("#adminGrantForm");
+const adminRevokeForm = document.querySelector("#adminRevokeForm");
+const banLock = document.querySelector("#banLock");
+const banLockTarget = document.querySelector("#banLockTarget");
+const banLockDate = document.querySelector("#banLockDate");
+const banLockReason = document.querySelector("#banLockReason");
 const accountModal = document.querySelector("#accountModal");
 const accountModalBackdrop = document.querySelector("#accountModalBackdrop");
 const accountModalClose = document.querySelector("#accountModalClose");
@@ -99,6 +129,10 @@ const DEFAULT_RATE_LIMIT = {
   windowMs: 86400000,
   resetAt: 0,
   limited: false,
+};
+const DEFAULT_PLATFORM = {
+  available: true,
+  updatedAt: 0,
 };
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
@@ -201,8 +235,13 @@ let activeApiBase = "";
 let currentAccount = null;
 let currentAccountStats = null;
 let currentRateLimit = { ...DEFAULT_RATE_LIMIT };
+let currentPlatform = { ...DEFAULT_PLATFORM };
+let currentBan = null;
+let activeView = "chat";
+let adminPortalData = null;
 let rateLimitRefreshTimerId = null;
 let rateLimitPopupTimerId = null;
+let platformRefreshTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
 let activeAccountView = "";
@@ -898,8 +937,93 @@ function rateLimitRemainingLabel(rateLimit = currentRateLimit || DEFAULT_RATE_LI
   return `${rateLimit.remaining} ${pluralize(rateLimit.remaining, "message")} left`;
 }
 
+function normalizePlatform(platform) {
+  if (!platform || typeof platform !== "object") {
+    return { ...DEFAULT_PLATFORM };
+  }
+  return {
+    available: platform.available !== false,
+    updatedAt: Number.isFinite(platform.updatedAt) ? Number(platform.updatedAt) : Date.now(),
+  };
+}
+
+function isPlatformUnavailable() {
+  return currentPlatform && currentPlatform.available === false;
+}
+
+function formatDateTime(timestamp) {
+  const date = new Date(Number(timestamp));
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown";
+  }
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function renderBanLock() {
+  if (!banLock) {
+    return;
+  }
+
+  const banned = Boolean(currentBan);
+  banLock.hidden = !banned;
+  document.body.classList.toggle("ban-lock-active", banned);
+  if (!banned) {
+    return;
+  }
+
+  if (banLockTarget) {
+    const prefix = currentBan.kind === "username" ? "@" : "";
+    banLockTarget.textContent = `${prefix}${currentBan.target || "Unknown"}`;
+  }
+  if (banLockDate) {
+    banLockDate.textContent = formatDateTime(currentBan.createdAt);
+  }
+  if (banLockReason) {
+    banLockReason.textContent = currentBan.reason || "Access was restricted by Learny moderation.";
+  }
+}
+
+function updateBanState(ban) {
+  currentBan = ban && typeof ban === "object" ? ban : null;
+  renderBanLock();
+}
+
+function updatePlatform(platform) {
+  currentPlatform = normalizePlatform(platform);
+  renderPlatformState();
+  syncComposerAvailability();
+}
+
+function isCurrentAdmin() {
+  return Boolean(currentAccount && currentAccount.isAdmin);
+}
+
 function syncComposerAvailability() {
+  const composer = chatForm;
+  const unavailable = isPlatformUnavailable();
+  if (composer) {
+    composer.classList.toggle("unavailable", unavailable);
+  }
+  if (messageInput) {
+    messageInput.placeholder = unavailable ? "Learny AI is currently unavailable." : "Ask anything";
+  }
+
   if (DIRECT_FILE_MODE) {
+    sendButton.disabled = true;
+    messageInput.disabled = true;
+    if (attachButton) {
+      attachButton.disabled = true;
+    }
+    return;
+  }
+
+  if (unavailable) {
     sendButton.disabled = true;
     messageInput.disabled = true;
     if (attachButton) {
@@ -1110,11 +1234,227 @@ function updateAccountButton() {
   if (currentAccount) {
     accountButton.classList.add("signed-in");
     accountStatusText.textContent = `@${currentAccount.username}`;
+    renderAdminAccess();
     return;
   }
 
   accountButton.classList.remove("signed-in");
   accountStatusText.textContent = "Sign in to sync";
+  renderAdminAccess();
+}
+
+function renderAdminAccess() {
+  const visible = isCurrentAdmin();
+  if (adminButton) {
+    adminButton.hidden = !visible;
+    adminButton.classList.toggle("active", activeView === "admin");
+  }
+  if (!visible && activeView === "admin") {
+    setMainView("chat");
+  }
+}
+
+function renderPlatformState() {
+  const available = !isPlatformUnavailable();
+  if (adminAvailabilityPill) {
+    adminAvailabilityPill.textContent = available ? "Available" : "Unavailable";
+    adminAvailabilityPill.classList.toggle("available", available);
+    adminAvailabilityPill.classList.toggle("unavailable", !available);
+  }
+  if (adminAvailabilityText) {
+    adminAvailabilityText.textContent = available
+      ? "Learny is accepting messages."
+      : "Learny is paused for everyone.";
+  }
+  if (adminAvailabilityToggle) {
+    adminAvailabilityToggle.checked = available;
+  }
+  if (adminAvailabilityLabel) {
+    adminAvailabilityLabel.textContent = available ? "Available" : "Unavailable";
+  }
+}
+
+function setMainView(view) {
+  const nextView = view === "admin" && isCurrentAdmin() ? "admin" : "chat";
+  activeView = nextView;
+  if (mainArea) {
+    mainArea.classList.toggle("admin-mode", nextView === "admin");
+  }
+  if (chatPanel) {
+    chatPanel.hidden = nextView === "admin";
+  }
+  if (adminPortal) {
+    adminPortal.hidden = nextView !== "admin";
+  }
+  if (messageSearch) {
+    messageSearch.hidden = nextView === "admin";
+  }
+  if (adminTopTitle) {
+    adminTopTitle.hidden = nextView !== "admin";
+  }
+  if (adminButton) {
+    adminButton.classList.toggle("active", nextView === "admin");
+  }
+  closeSidebarOnMobile();
+  if (nextView === "admin") {
+    loadAdminPortal();
+  } else if (messageInput && !DIRECT_FILE_MODE && !isPlatformUnavailable()) {
+    messageInput.focus();
+  }
+}
+
+function setAdminStatus(text = "", isError = false) {
+  if (!adminStatusMessage) {
+    return;
+  }
+  adminStatusMessage.textContent = text;
+  adminStatusMessage.classList.toggle("error", isError);
+}
+
+function accountImageSource(account) {
+  return account && typeof account.profilePicture === "string" && account.profilePicture.trim()
+    ? account.profilePicture.trim()
+    : PROFILE_ICON_PATH;
+}
+
+function renderAdminAccountRow(account, { compact = false } = {}) {
+  const row = document.createElement("article");
+  row.className = "admin-account-row";
+
+  const image = document.createElement("img");
+  image.className = "admin-avatar";
+  image.src = accountImageSource(account);
+  image.alt = "";
+
+  const copy = document.createElement("div");
+  copy.className = "admin-account-copy";
+  const name = document.createElement("strong");
+  name.textContent = account.username || "Unknown";
+  const meta = document.createElement("span");
+  meta.textContent = compact
+    ? `Seen ${formatDateTime(account.lastSeenAt)}`
+    : `${account.chatCount || 0} chats - ${account.messageCount || 0} messages`;
+  const badges = document.createElement("div");
+  badges.className = "admin-badges";
+  if (account.isAdmin) {
+    const badge = document.createElement("span");
+    badge.className = "admin-badge admin";
+    badge.textContent = "Admin";
+    badges.append(badge);
+  }
+  if (account.ban) {
+    const badge = document.createElement("span");
+    badge.className = "admin-badge banned";
+    badge.textContent = "Restricted";
+    badges.append(badge);
+  }
+  copy.append(name, meta, badges);
+  row.append(image, copy);
+
+  if (!compact) {
+    const actions = document.createElement("div");
+    actions.className = "admin-row-actions";
+    actions.append(
+      createAdminMiniAction(account.isAdmin ? "Revoke" : "Promote", () =>
+        submitAdminJson("/api/admin/role", {
+          username: account.username,
+          admin: !account.isAdmin,
+        }),
+      ),
+      createAdminMiniAction(account.ban ? "Unlock" : "Lock", () =>
+        submitAdminJson(
+          account.ban ? "/api/admin/unban" : "/api/admin/ban",
+          account.ban
+            ? { kind: "username", target: account.username }
+            : { kind: "username", target: account.username, reason: "Restricted from the Admin Portal." },
+        ),
+      ),
+      createAdminMiniAction("Delete", () =>
+        submitAdminJson("/api/admin/delete-account", { username: account.username }),
+        true,
+      ),
+    );
+    row.append(actions);
+  }
+
+  return row;
+}
+
+function createAdminMiniAction(text, onClick, danger = false) {
+  const button = document.createElement("button");
+  button.className = `admin-mini-action${danger ? " danger" : ""}`;
+  button.type = "button";
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function renderAdminList(container, items, emptyText, renderer) {
+  if (!container) {
+    return;
+  }
+  container.replaceChildren();
+  if (!Array.isArray(items) || items.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty-admin-list";
+    empty.textContent = emptyText;
+    container.append(empty);
+    return;
+  }
+  items.forEach((item) => container.append(renderer(item)));
+}
+
+function renderAdminBanRow(ban) {
+  const row = document.createElement("article");
+  row.className = "admin-ban-row";
+  const title = document.createElement("strong");
+  title.textContent = `${ban.kind === "username" ? "@" : ""}${ban.target || "Unknown"}`;
+  const meta = document.createElement("span");
+  meta.textContent = `${formatDateTime(ban.createdAt)} - ${ban.reason || "No reason supplied."}`;
+  const actions = document.createElement("div");
+  actions.className = "admin-row-actions";
+  actions.append(
+    createAdminMiniAction("Unlock", () =>
+      submitAdminJson("/api/admin/unban", { kind: ban.kind, target: ban.target }),
+    ),
+  );
+  row.append(title, meta, actions);
+  return row;
+}
+
+function renderAdminPortal(data = adminPortalData) {
+  const portal = data && data.adminPortal ? data.adminPortal : data;
+  if (!portal || typeof portal !== "object") {
+    return;
+  }
+  adminPortalData = portal;
+  updatePlatform(portal.platform || DEFAULT_PLATFORM);
+  const accounts = Array.isArray(portal.accounts) ? portal.accounts : [];
+  const admins = Array.isArray(portal.admins) ? portal.admins : [];
+  const bans = Array.isArray(portal.bans) ? portal.bans : [];
+
+  if (adminPortalSummary) {
+    adminPortalSummary.textContent =
+      `${accounts.length} ${pluralize(accounts.length, "account")} monitored, ` +
+      `${bans.length} active ${pluralize(bans.length, "restriction")}.`;
+  }
+  if (adminAccountsCount) {
+    adminAccountsCount.textContent = String(accounts.length);
+  }
+  if (adminAdminsCount) {
+    adminAdminsCount.textContent = String(admins.length);
+  }
+  if (adminBansCount) {
+    adminBansCount.textContent = String(bans.length);
+  }
+
+  renderAdminList(adminAccountsList, accounts, "No accounts yet", (account) =>
+    renderAdminAccountRow(account),
+  );
+  renderAdminList(adminAdminsList, admins, "No admins yet", (account) =>
+    renderAdminAccountRow(account, { compact: true }),
+  );
+  renderAdminList(adminBansList, bans, "No active restrictions", renderAdminBanRow);
 }
 
 function formatAccountDate(timestamp) {
@@ -1371,6 +1711,97 @@ async function syncChatsToServer() {
   } catch (error) {}
 }
 
+async function loadPlatformState({ scheduleNext = true } = {}) {
+  if (DIRECT_FILE_MODE || currentBan) {
+    return null;
+  }
+  try {
+    const data = await apiFetch(
+      "/api/platform",
+      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    if (data.platform) {
+      updatePlatform(data.platform);
+    }
+    if (data.account) {
+      currentAccount = data.account;
+      updateAccountButton();
+    }
+    if (data.ban) {
+      updateBanState(data.ban);
+    }
+    return data;
+  } catch (error) {
+    return null;
+  } finally {
+    if (scheduleNext && platformRefreshTimerId === null && !currentBan) {
+      platformRefreshTimerId = window.setTimeout(() => {
+        platformRefreshTimerId = null;
+        loadPlatformState();
+      }, 10000);
+    }
+  }
+}
+
+async function loadAdminPortal() {
+  if (!isCurrentAdmin() || DIRECT_FILE_MODE) {
+    return null;
+  }
+  setAdminStatus("Loading portal...");
+  try {
+    const data = await apiFetch(
+      "/api/admin/portal",
+      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    renderAdminPortal(data);
+    setAdminStatus("Portal refreshed.");
+    return data;
+  } catch (error) {
+    setAdminStatus(GENERIC_ERROR_MESSAGE, true);
+    return null;
+  }
+}
+
+async function submitAdminJson(endpoint, payload) {
+  if (!isCurrentAdmin() || DIRECT_FILE_MODE) {
+    return null;
+  }
+  setAdminStatus("Saving change...");
+  try {
+    const data = await apiFetch(
+      endpoint,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        timeoutMs: STATUS_FETCH_TIMEOUT_MS,
+      },
+      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+    );
+    renderAdminPortal(data);
+    await refreshAccountModalDetails();
+    updateAccountButton();
+    setAdminStatus("Change saved.");
+    return data;
+  } catch (error) {
+    setAdminStatus(GENERIC_ERROR_MESSAGE, true);
+    return null;
+  }
+}
+
+function bindAdminForm(form, handler) {
+  if (!form) {
+    return;
+  }
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const formData = new FormData(form);
+    await handler(formData);
+    form.reset();
+  });
+}
+
 async function loadAccountAndChats() {
   updateAccountButton();
   if (DIRECT_FILE_MODE) {
@@ -1558,6 +1989,9 @@ function clearChatSearch() {
 }
 
 function createChat() {
+  if (activeView !== "chat") {
+    setMainView("chat");
+  }
   clearChatSearch();
   clearMessageSearch();
   const chat = {
@@ -1596,6 +2030,9 @@ function openChat(chatId) {
   const chat = getChatById(chatId);
   if (!chat) {
     return;
+  }
+  if (activeView !== "chat") {
+    setMainView("chat");
   }
   activeChatId = chat.id;
   sessionId = chat.sessionId;
@@ -2121,8 +2558,23 @@ function isApiResponseData(data) {
     "authenticated" in data ||
     "account" in data ||
     "chats" in data ||
-    "rateLimit" in data
+    "rateLimit" in data ||
+    "platform" in data ||
+    "ban" in data ||
+    "adminPortal" in data
   );
+}
+
+function consumeApiState(data) {
+  if (!data || typeof data !== "object") {
+    return;
+  }
+  if (data.platform) {
+    updatePlatform(data.platform);
+  }
+  if (data.ban) {
+    updateBanState(data.ban);
+  }
 }
 
 function sleep(milliseconds) {
@@ -2206,11 +2658,12 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       }
 
       if (!response.ok) {
+        consumeApiState(data);
         const responseError = new Error(GENERIC_ERROR_MESSAGE);
         responseError.status = response.status;
         responseError.data = data;
         responseError.retryable = data && typeof data === "object" ? data.retryable : undefined;
-        responseError.stopFallback = response.status === 429;
+        responseError.stopFallback = response.status === 429 || Boolean(data && data.ban);
         throw responseError;
       }
       if (!isApiResponseData(data)) {
@@ -2218,6 +2671,7 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       }
 
       activeApiBase = apiBase;
+      consumeApiState(data);
       return data;
     } catch (error) {
       lastError = error;
@@ -2276,6 +2730,11 @@ function createAskRequestBody(message, chat, attachments) {
 
 async function askLearny(message, { addUserMessage = true, attachments = [] } = {}) {
   if (DIRECT_FILE_MODE) {
+    return;
+  }
+
+  if (isPlatformUnavailable()) {
+    syncComposerAvailability();
     return;
   }
 
@@ -2349,6 +2808,13 @@ async function askLearny(message, { addUserMessage = true, attachments = [] } = 
         }, { animateWords: true });
         completed = true;
       } catch (error) {
+        if (error && error.data && error.data.platform && error.data.platform.available === false) {
+          typing.remove();
+          updatePlatform(error.data.platform);
+          completed = true;
+          continue;
+        }
+
         if (error && error.status === 429 && error.data && error.data.rateLimit) {
           typing.remove();
           if (error.data.rateSessionId) {
@@ -2380,7 +2846,7 @@ async function askLearny(message, { addUserMessage = true, attachments = [] } = 
   } finally {
     isSending = false;
     syncComposerAvailability();
-    if (!isRateLimited()) {
+    if (!isRateLimited() && !isPlatformUnavailable()) {
       messageInput.focus();
     }
   }
@@ -2577,6 +3043,10 @@ chatForm.addEventListener("submit", (event) => {
   if (isSending) {
     return;
   }
+  if (isPlatformUnavailable()) {
+    syncComposerAvailability();
+    return;
+  }
 
   const message = messageInput.value.trim();
   if (!message) {
@@ -2637,6 +3107,70 @@ if (accountButton) {
     openAccountModal(currentAccount ? "myaccount" : "sign-in");
   });
 }
+
+if (adminButton) {
+  adminButton.addEventListener("click", () => setMainView("admin"));
+}
+
+if (adminRefreshButton) {
+  adminRefreshButton.addEventListener("click", () => loadAdminPortal());
+}
+
+if (adminAvailabilityToggle) {
+  adminAvailabilityToggle.addEventListener("change", () => {
+    submitAdminJson("/api/admin/platform", { available: adminAvailabilityToggle.checked });
+  });
+}
+
+bindAdminForm(adminBanUsernameForm, (formData) =>
+  submitAdminJson("/api/admin/ban", {
+    kind: "username",
+    target: String(formData.get("username") || "").trim(),
+    reason: String(formData.get("reason") || "").trim(),
+  }),
+);
+
+bindAdminForm(adminUnbanUsernameForm, (formData) =>
+  submitAdminJson("/api/admin/unban", {
+    kind: "username",
+    target: String(formData.get("username") || "").trim(),
+  }),
+);
+
+bindAdminForm(adminBanIpForm, (formData) =>
+  submitAdminJson("/api/admin/ban", {
+    kind: "ip",
+    target: String(formData.get("ip") || "").trim(),
+    reason: String(formData.get("reason") || "").trim(),
+  }),
+);
+
+bindAdminForm(adminUnbanIpForm, (formData) =>
+  submitAdminJson("/api/admin/unban", {
+    kind: "ip",
+    target: String(formData.get("ip") || "").trim(),
+  }),
+);
+
+bindAdminForm(adminDeleteAccountForm, (formData) =>
+  submitAdminJson("/api/admin/delete-account", {
+    username: String(formData.get("username") || "").trim(),
+  }),
+);
+
+bindAdminForm(adminGrantForm, (formData) =>
+  submitAdminJson("/api/admin/role", {
+    username: String(formData.get("username") || "").trim(),
+    admin: true,
+  }),
+);
+
+bindAdminForm(adminRevokeForm, (formData) =>
+  submitAdminJson("/api/admin/role", {
+    username: String(formData.get("username") || "").trim(),
+    admin: false,
+  }),
+);
 
 document.querySelectorAll("[data-open-account-view]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -2799,6 +3333,7 @@ if (activeChat) {
 }
 
 renderChatList();
+renderPlatformState();
 renderRateLimit();
 
 if (DIRECT_FILE_MODE) {
@@ -2817,5 +3352,6 @@ if (DIRECT_FILE_MODE) {
 }
 
 loadAccountAndChats();
+loadPlatformState();
 loadRateLimit();
 releaseLoadingScreen();

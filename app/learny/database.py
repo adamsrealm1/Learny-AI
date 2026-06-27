@@ -20,6 +20,8 @@ SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 RATE_LIMIT_LIMIT = 200
 RATE_LIMIT_WINDOW_MS = 86_400_000
 RATE_LIMIT_RESET_TIMEZONE = timezone(timedelta(hours=-4), "EDT")
+DEFAULT_ADMIN_USERNAME = "adamsrealm1"
+PLATFORM_AVAILABLE_KEY = "learny_available"
 
 
 class AccountError(ValueError):
@@ -63,6 +65,7 @@ class LearnyDatabase:
                     password_salt TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
                     profile_picture TEXT,
+                    is_admin INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     last_seen_at INTEGER NOT NULL
                 );
@@ -113,6 +116,23 @@ class LearnyDatabase:
                     created_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS moderation_bans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    kind TEXT NOT NULL,
+                    target_key TEXT NOT NULL,
+                    display_target TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    created_by TEXT NOT NULL DEFAULT '',
+                    UNIQUE(kind, target_key)
+                );
+
+                CREATE TABLE IF NOT EXISTS platform_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_account_sessions_account_id
                     ON account_sessions(account_id);
                 CREATE INDEX IF NOT EXISTS idx_chats_account_updated
@@ -121,10 +141,15 @@ class LearnyDatabase:
                     ON messages(account_id, chat_id, id);
                 CREATE INDEX IF NOT EXISTS idx_rate_limit_identity_created
                     ON rate_limit_events(identity_key, created_at);
+                CREATE INDEX IF NOT EXISTS idx_moderation_bans_kind_target
+                    ON moderation_bans(kind, target_key);
                 """
             )
             self._ensure_profile_picture_column(connection)
+            self._ensure_account_admin_column(connection)
             self._ensure_message_history_column(connection)
+            self._ensure_default_admin(connection)
+            self._ensure_platform_settings(connection)
 
     def _ensure_profile_picture_column(self, connection: sqlite3.Connection) -> None:
         columns = {
@@ -142,6 +167,31 @@ class LearnyDatabase:
         if "history_text" not in columns:
             connection.execute("ALTER TABLE messages ADD COLUMN history_text TEXT NOT NULL DEFAULT ''")
 
+    def _ensure_account_admin_column(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(accounts)").fetchall()
+        }
+        if "is_admin" not in columns:
+            connection.execute("ALTER TABLE accounts ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_default_admin(self, connection: sqlite3.Connection) -> None:
+        connection.execute(
+            "UPDATE accounts SET is_admin = 1 WHERE username = ? COLLATE NOCASE",
+            (DEFAULT_ADMIN_USERNAME,),
+        )
+
+    def _ensure_platform_settings(self, connection: sqlite3.Connection) -> None:
+        now = _now_ms()
+        connection.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO NOTHING
+            """,
+            (PLATFORM_AVAILABLE_KEY, "1", now),
+        )
+
     def create_account(self, username: str, password: str) -> dict[str, Any]:
         username = _clean_username(username)
         _validate_password(password)
@@ -153,10 +203,19 @@ class LearnyDatabase:
             try:
                 cursor = connection.execute(
                     """
-                    INSERT INTO accounts (username, password_salt, password_hash, created_at, last_seen_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO accounts
+                        (username, password_salt, password_hash, profile_picture, is_admin, created_at, last_seen_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (username, salt, password_hash, now, now),
+                    (
+                        username,
+                        salt,
+                        password_hash,
+                        None,
+                        1 if _is_default_admin_username(username) else 0,
+                        now,
+                        now,
+                    ),
                 )
             except sqlite3.IntegrityError as error:
                 raise AccountError("Account could not be created.") from error
@@ -171,6 +230,7 @@ class LearnyDatabase:
             "id": account_id,
             "username": username,
             "profilePicture": None,
+            "isAdmin": _is_default_admin_username(username),
             "createdAt": now,
             "lastSeenAt": now,
         }
@@ -203,6 +263,7 @@ class LearnyDatabase:
             "id": int(row["id"]),
             "username": str(row["username"]),
             "profilePicture": row["profile_picture"],
+            "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -225,6 +286,7 @@ class LearnyDatabase:
             "id": int(row["id"]),
             "username": str(row["username"]),
             "profilePicture": row["profile_picture"],
+            "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -289,6 +351,7 @@ class LearnyDatabase:
             "id": int(row["id"]),
             "username": str(row["username"]),
             "profilePicture": row["profile_picture"],
+            "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -317,6 +380,191 @@ class LearnyDatabase:
             "messages": int(message_count),
             "sessions": int(session_count),
         }
+
+    def list_accounts(self) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    accounts.id,
+                    accounts.username,
+                    accounts.profile_picture,
+                    accounts.is_admin,
+                    accounts.created_at,
+                    accounts.last_seen_at,
+                    COALESCE(chat_counts.value, 0) AS chat_count,
+                    COALESCE(message_counts.value, 0) AS message_count
+                FROM accounts
+                LEFT JOIN (
+                    SELECT account_id, COUNT(*) AS value
+                    FROM chats
+                    GROUP BY account_id
+                ) AS chat_counts ON chat_counts.account_id = accounts.id
+                LEFT JOIN (
+                    SELECT account_id, COUNT(*) AS value
+                    FROM messages
+                    GROUP BY account_id
+                ) AS message_counts ON message_counts.account_id = accounts.id
+                ORDER BY accounts.last_seen_at DESC, accounts.created_at DESC
+                """
+            ).fetchall()
+            bans = {
+                str(row["target_key"]): _ban_from_row(row)
+                for row in connection.execute(
+                    "SELECT * FROM moderation_bans WHERE kind = ?",
+                    ("username",),
+                ).fetchall()
+            }
+
+        accounts: list[dict[str, Any]] = []
+        for row in rows:
+            account = _account_from_row(row)
+            account["chatCount"] = int(row["chat_count"])
+            account["messageCount"] = int(row["message_count"])
+            account["ban"] = bans.get(str(account["username"]).casefold())
+            accounts.append(account)
+        return accounts
+
+    def list_admins(self) -> list[dict[str, Any]]:
+        return [account for account in self.list_accounts() if account.get("isAdmin")]
+
+    def set_account_admin(self, username: str, is_admin: bool) -> dict[str, Any]:
+        clean_username = _clean_username(username)
+        if _is_default_admin_username(clean_username) and not is_admin:
+            raise AccountError("The owner admin cannot be changed.")
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM accounts WHERE username = ?",
+                (clean_username,),
+            ).fetchone()
+            if row is None:
+                raise AccountError("Account could not be found.")
+            connection.execute(
+                "UPDATE accounts SET is_admin = ?, last_seen_at = ? WHERE id = ?",
+                (1 if is_admin else 0, _now_ms(), int(row["id"])),
+            )
+            updated = connection.execute(
+                "SELECT * FROM accounts WHERE id = ?",
+                (int(row["id"]),),
+            ).fetchone()
+
+        if updated is None:
+            raise AccountError("Account could not be updated.")
+        return _account_from_row(updated)
+
+    def delete_account_by_username(self, username: str) -> bool:
+        clean_username = _clean_username(username)
+        if _is_default_admin_username(clean_username):
+            raise AccountError("The owner admin cannot be deleted.")
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM accounts WHERE username = ?",
+                (clean_username,),
+            )
+            return bool(cursor.rowcount)
+
+    def platform_state(self) -> dict[str, Any]:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT value, updated_at FROM platform_settings WHERE key = ?",
+                (PLATFORM_AVAILABLE_KEY,),
+            ).fetchone()
+            if row is None:
+                self._ensure_platform_settings(connection)
+                row = connection.execute(
+                    "SELECT value, updated_at FROM platform_settings WHERE key = ?",
+                    (PLATFORM_AVAILABLE_KEY,),
+                ).fetchone()
+
+        value = "1" if row is None else str(row["value"])
+        updated_at = _now_ms() if row is None else int(row["updated_at"])
+        return {"available": value == "1", "updatedAt": updated_at}
+
+    def set_platform_available(self, available: bool) -> dict[str, Any]:
+        now = _now_ms()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO platform_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                """,
+                (PLATFORM_AVAILABLE_KEY, "1" if available else "0", now),
+            )
+        return {"available": bool(available), "updatedAt": now}
+
+    def list_bans(self) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM moderation_bans ORDER BY created_at DESC"
+            ).fetchall()
+        return [_ban_from_row(row) for row in rows]
+
+    def ban_identity(
+        self,
+        kind: str,
+        target: str,
+        reason: str,
+        *,
+        created_by: str = "",
+    ) -> dict[str, Any]:
+        clean_kind = _clean_ban_kind(kind)
+        display_target, target_key = _clean_ban_target(clean_kind, target)
+        clean_reason = _clean_ban_reason(reason)
+        clean_created_by = " ".join(str(created_by).strip().split())[:80]
+        now = _now_ms()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO moderation_bans
+                    (kind, target_key, display_target, reason, created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(kind, target_key) DO UPDATE SET
+                    display_target = excluded.display_target,
+                    reason = excluded.reason,
+                    created_at = excluded.created_at,
+                    created_by = excluded.created_by
+                """,
+                (clean_kind, target_key, display_target, clean_reason, now, clean_created_by),
+            )
+            row = connection.execute(
+                "SELECT * FROM moderation_bans WHERE kind = ? AND target_key = ?",
+                (clean_kind, target_key),
+            ).fetchone()
+        if row is None:
+            raise AccountError("Ban could not be saved.")
+        return _ban_from_row(row)
+
+    def unban_identity(self, kind: str, target: str) -> bool:
+        clean_kind = _clean_ban_kind(kind)
+        _, target_key = _clean_ban_target(clean_kind, target)
+        with self._lock, self._connect() as connection:
+            cursor = connection.execute(
+                "DELETE FROM moderation_bans WHERE kind = ? AND target_key = ?",
+                (clean_kind, target_key),
+            )
+            return bool(cursor.rowcount)
+
+    def ban_for(self, *, username: str | None = None, ip_address: str | None = None) -> dict[str, Any] | None:
+        candidates: list[tuple[str, str]] = []
+        if username:
+            display_target, target_key = _clean_ban_target("username", username)
+            candidates.append(("username", target_key))
+        if ip_address:
+            display_target, target_key = _clean_ban_target("ip", ip_address)
+            candidates.append(("ip", target_key))
+        if not candidates:
+            return None
+
+        with self._lock, self._connect() as connection:
+            for kind, target_key in candidates:
+                row = connection.execute(
+                    "SELECT * FROM moderation_bans WHERE kind = ? AND target_key = ?",
+                    (kind, target_key),
+                ).fetchone()
+                if row is not None:
+                    return _ban_from_row(row)
+        return None
 
     def peek_rate_limit(
         self,
@@ -579,6 +827,70 @@ def _clean_username(username: str) -> str:
     return cleaned
 
 
+def _is_default_admin_username(username: str) -> bool:
+    return str(username).casefold() == DEFAULT_ADMIN_USERNAME.casefold()
+
+
+def _row_bool(row: Any, key: str) -> bool:
+    try:
+        return bool(int(row[key]))
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+
+
+def _account_from_row(row: Any) -> dict[str, Any]:
+    username = _row_string(row, "username")
+    profile_picture = _row_string(row, "profile_picture").strip()
+    is_admin = _row_bool(row, "is_admin") or _is_default_admin_username(username)
+    return {
+        "id": int(row["id"]),
+        "username": username,
+        "profilePicture": profile_picture or None,
+        "isAdmin": is_admin,
+        "createdAt": int(row["created_at"]),
+        "lastSeenAt": int(row["last_seen_at"]),
+    }
+
+
+def _clean_ban_kind(kind: str) -> str:
+    clean_kind = str(kind).strip().casefold()
+    if clean_kind not in {"username", "ip"}:
+        raise AccountError("Ban type is invalid.")
+    return clean_kind
+
+
+def _clean_ban_target(kind: str, target: str) -> tuple[str, str]:
+    clean_kind = _clean_ban_kind(kind)
+    if clean_kind == "username":
+        display_target = _clean_username(target)
+        return display_target, display_target.casefold()
+
+    display_target = " ".join(str(target).strip().split())
+    if len(display_target) < 2 or len(display_target) > 80:
+        raise AccountError("Ban target is invalid.")
+    if not all(character.isalnum() or character in ".:-_" for character in display_target):
+        raise AccountError("Ban target is invalid.")
+    return display_target, display_target.casefold()
+
+
+def _clean_ban_reason(reason: str) -> str:
+    clean_reason = " ".join(str(reason).strip().split())
+    if not clean_reason:
+        clean_reason = "Access was restricted by Learny moderation."
+    return clean_reason[:240]
+
+
+def _ban_from_row(row: Any) -> dict[str, Any]:
+    return {
+        "kind": _row_string(row, "kind"),
+        "target": _row_string(row, "display_target"),
+        "targetKey": _row_string(row, "target_key"),
+        "reason": _row_string(row, "reason") or "Access was restricted by Learny moderation.",
+        "createdAt": int(row["created_at"]),
+        "createdBy": _row_string(row, "created_by"),
+    }
+
+
 def _validate_password(password: str) -> None:
     if not isinstance(password, str) or len(password) < 8 or len(password) > 256:
         raise AccountError("Account input is invalid.")
@@ -700,9 +1012,10 @@ def _messages_with_preserved_history_text(
 
 def _row_string(row: Any, key: str) -> str:
     try:
-        return str(row[key])
+        value = row[key]
     except (KeyError, IndexError, TypeError):
         return ""
+    return "" if value is None else str(value)
 
 
 def _clean_timestamp(value: Any, fallback: int) -> int:

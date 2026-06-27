@@ -185,6 +185,7 @@ class LearnyGroqOnlyTests(unittest.TestCase):
                 "app",
                 "ok",
                 "groqEnabled",
+                "platform",
                 "primaryModel",
                 "fallbackModel",
                 "secondFallbackModel",

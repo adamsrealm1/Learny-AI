@@ -32,7 +32,13 @@ from .groq_client import (
     THIRD_FALLBACK_GROQ_MODEL,
     GroqAnswerGenerator,
 )
-from .database import AccountError, AuthenticationError, RATE_LIMIT_LIMIT, RATE_LIMIT_WINDOW_MS
+from .database import (
+    DEFAULT_ADMIN_USERNAME,
+    AccountError,
+    AuthenticationError,
+    RATE_LIMIT_LIMIT,
+    RATE_LIMIT_WINDOW_MS,
+)
 from .messages import GENERIC_ERROR_MESSAGE
 from .storage import create_learny_database
 
@@ -81,7 +87,6 @@ SUPPORTED_ATTACHMENT_EXTENSIONS = {
     "xml",
 }
 PLAIN_TEXT_ATTACHMENT_EXTENSIONS = {"txt", "md", "log", "csv", "json", "xml"}
-RATE_LIMIT_ADMIN_USERNAME = "adamsrealm1"
 GUEST_RATE_LIMIT_LIMIT = 30
 GLOBAL_SIGNED_IN_RATE_LIMIT_IDENTITY = "global:signed-in-ask"
 GLOBAL_GUEST_RATE_LIMIT_IDENTITY = "global:guest-ask"
@@ -150,6 +155,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if route == "/api/rate-limit":
                 self._handle_rate_limit()
                 return
+            if route == "/api/platform":
+                self._handle_platform()
+                return
+            if route == "/api/admin/portal":
+                self._handle_admin_portal()
+                return
             if route == "/api/chats":
                 self._handle_get_chats()
                 return
@@ -178,6 +189,21 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if route == "/api/rate-limits/reset":
                 self._handle_reset_rate_limits()
                 return
+            if route == "/api/admin/platform":
+                self._handle_admin_platform()
+                return
+            if route == "/api/admin/ban":
+                self._handle_admin_ban()
+                return
+            if route == "/api/admin/unban":
+                self._handle_admin_unban()
+                return
+            if route == "/api/admin/delete-account":
+                self._handle_admin_delete_account()
+                return
+            if route == "/api/admin/role":
+                self._handle_admin_role()
+                return
             if route == "/api/chats/sync":
                 self._handle_sync_chats()
                 return
@@ -203,11 +229,13 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
         def _handle_status(self) -> None:
             groq_enabled = config.generator_factory() is not None
+            platform = database.platform_state()
             self._send_json(
                 {
                     "app": "Learny AI",
-                    "ok": groq_enabled,
+                    "ok": groq_enabled and bool(platform["available"]),
                     "groqEnabled": groq_enabled,
+                    "platform": _public_platform(platform),
                     "primaryModel": PRIMARY_GROQ_MODEL,
                     "fallbackModel": FALLBACK_GROQ_MODEL,
                     "secondFallbackModel": SECOND_FALLBACK_GROQ_MODEL,
@@ -221,8 +249,19 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
         def _handle_account(self) -> None:
             account = self._current_account()
+            platform = database.platform_state()
+            ban = self._current_ban(account)
             if account is None:
-                self._send_json({"authenticated": False, "account": None, "stats": None})
+                self._send_json(
+                    {
+                        "authenticated": False,
+                        "account": None,
+                        "stats": None,
+                        "platform": _public_platform(platform),
+                        "ban": _public_ban(ban) if ban else None,
+                    },
+                    HTTPStatus.FORBIDDEN if ban else HTTPStatus.OK,
+                )
                 return
 
             self._send_json(
@@ -230,14 +269,39 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "authenticated": True,
                     "account": _public_account(account),
                     "stats": database.account_stats(int(account["id"])),
+                    "platform": _public_platform(platform),
+                    "ban": _public_ban(ban) if ban else None,
                 }
             )
+
+        def _handle_platform(self) -> None:
+            account = self._current_account()
+            platform = database.platform_state()
+            ban = self._current_ban(account)
+            self._send_json(
+                {
+                    "platform": _public_platform(platform),
+                    "ban": _public_ban(ban) if ban else None,
+                    "account": _public_account(account) if account else None,
+                },
+                HTTPStatus.FORBIDDEN if ban else HTTPStatus.OK,
+            )
+
+        def _handle_admin_portal(self) -> None:
+            admin = self._require_admin_account()
+            if admin is None:
+                return
+            self._send_json(_admin_portal_payload(database))
 
         def _handle_create_account(self) -> None:
             try:
                 body = self._read_json_body()
                 username = _required_string(body, "username")
                 password = _required_string(body, "password")
+                ban = self._ban_for(username=username)
+                if ban:
+                    self._send_ban_response(ban)
+                    return
                 account = database.create_account(username, password)
                 token = database.create_session(int(account["id"]))
             except (ValueError, AccountError):
@@ -249,6 +313,8 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "authenticated": True,
                     "account": _public_account(account),
                     "stats": database.account_stats(int(account["id"])),
+                    "platform": _public_platform(database.platform_state()),
+                    "ban": None,
                 },
                 extra_headers=[_account_cookie_header(token, self._needs_cross_site_cookie())],
             )
@@ -258,6 +324,10 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 body = self._read_json_body()
                 username = _required_string(body, "username")
                 password = _required_string(body, "password")
+                ban = self._ban_for(username=username)
+                if ban:
+                    self._send_ban_response(ban)
+                    return
                 account = database.authenticate(username, password)
                 token = database.create_session(int(account["id"]))
             except (ValueError, AccountError, AuthenticationError):
@@ -269,6 +339,8 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "authenticated": True,
                     "account": _public_account(account),
                     "stats": database.account_stats(int(account["id"])),
+                    "platform": _public_platform(database.platform_state()),
+                    "ban": None,
                 },
                 extra_headers=[_account_cookie_header(token, self._needs_cross_site_cookie())],
             )
@@ -319,7 +391,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if account is None:
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
                 return
-            if not _is_rate_limit_admin(account):
+            if not _is_admin_account(account):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
                 return
 
@@ -342,6 +414,10 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
         def _handle_rate_limit(self) -> None:
             account = self._current_account()
+            ban = self._current_ban(account)
+            if ban:
+                self._send_ban_response(ban)
+                return
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
             rate_limit_identity, rate_limit_size = _rate_limit_policy(account)
             rate_limit = database.peek_rate_limit(
@@ -356,10 +432,86 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 }
             )
 
+        def _handle_admin_platform(self) -> None:
+            admin = self._require_admin_account()
+            if admin is None:
+                return
+            try:
+                body = self._read_json_body()
+                available = bool(body.get("available"))
+                database.set_platform_available(available)
+            except (ValueError, AccountError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(_admin_portal_payload(database))
+
+        def _handle_admin_ban(self) -> None:
+            admin = self._require_admin_account()
+            if admin is None:
+                return
+            try:
+                body = self._read_json_body()
+                database.ban_identity(
+                    _required_string(body, "kind"),
+                    _required_string(body, "target"),
+                    _optional_string(body, "reason") or "",
+                    created_by=str(admin["username"]),
+                )
+            except (ValueError, AccountError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(_admin_portal_payload(database))
+
+        def _handle_admin_unban(self) -> None:
+            admin = self._require_admin_account()
+            if admin is None:
+                return
+            try:
+                body = self._read_json_body()
+                database.unban_identity(
+                    _required_string(body, "kind"),
+                    _required_string(body, "target"),
+                )
+            except (ValueError, AccountError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(_admin_portal_payload(database))
+
+        def _handle_admin_delete_account(self) -> None:
+            admin = self._require_admin_account()
+            if admin is None:
+                return
+            try:
+                body = self._read_json_body()
+                deleted = database.delete_account_by_username(_required_string(body, "username"))
+            except (ValueError, AccountError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json({**_admin_portal_payload(database), "deleted": deleted})
+
+        def _handle_admin_role(self) -> None:
+            admin = self._require_admin_account()
+            if admin is None:
+                return
+            try:
+                body = self._read_json_body()
+                updated = database.set_account_admin(
+                    _required_string(body, "username"),
+                    bool(body.get("admin")),
+                )
+            except (ValueError, AccountError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json({**_admin_portal_payload(database), "updatedAccount": _public_account(updated)})
+
         def _handle_get_chats(self) -> None:
             account = self._current_account()
             if account is None:
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+            ban = self._current_ban(account)
+            if ban:
+                self._send_ban_response(ban)
                 return
 
             self._send_json({"chats": database.list_chats(int(account["id"]))})
@@ -368,6 +520,10 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             account = self._current_account()
             if account is None:
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return
+            ban = self._current_ban(account)
+            if ban:
+                self._send_ban_response(ban)
                 return
 
             try:
@@ -395,6 +551,21 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 return
 
             account = self._current_account()
+            ban = self._current_ban(account)
+            if ban:
+                self._send_ban_response(ban)
+                return
+            platform = database.platform_state()
+            if not platform.get("available", True):
+                self._send_json(
+                    {
+                        "error": GENERIC_ERROR_MESSAGE,
+                        "retryable": False,
+                        "platform": _public_platform(platform),
+                    },
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                )
+                return
             chat_id = _optional_string(body, "chatId")
             requested_session_id = (
                 _optional_string(body, "sessionId")
@@ -531,6 +702,55 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
         def _current_account(self) -> dict[str, Any] | None:
             return database.get_account_for_session(self._account_session_token())
+
+        def _require_admin_account(self) -> dict[str, Any] | None:
+            account = self._current_account()
+            if account is None:
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
+                return None
+            ban = self._current_ban(account)
+            if ban:
+                self._send_ban_response(ban)
+                return None
+            if not _is_admin_account(account):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
+                return None
+            return account
+
+        def _current_ban(self, account: dict[str, Any] | None = None) -> dict[str, Any] | None:
+            username = str(account["username"]) if account else None
+            return self._ban_for(username=username)
+
+        def _ban_for(self, *, username: str | None = None) -> dict[str, Any] | None:
+            try:
+                return database.ban_for(username=username, ip_address=self._client_ip())
+            except AccountError:
+                return None
+
+        def _send_ban_response(self, ban: dict[str, Any]) -> None:
+            self._send_json(
+                {
+                    "error": GENERIC_ERROR_MESSAGE,
+                    "retryable": False,
+                    "ban": _public_ban(ban),
+                    "platform": _public_platform(database.platform_state()),
+                },
+                HTTPStatus.FORBIDDEN,
+            )
+
+        def _client_ip(self) -> str:
+            forwarded_for = self.headers.get("X-Forwarded-For", "")
+            if forwarded_for:
+                first_value = forwarded_for.split(",", 1)[0].strip()
+                if first_value:
+                    return first_value
+            real_ip = self.headers.get("X-Real-IP", "").strip()
+            if real_ip:
+                return real_ip
+            try:
+                return str(self.client_address[0])
+            except Exception:
+                return "unknown"
 
         def _account_session_token(self) -> str | None:
             cookie = SimpleCookie()
@@ -1117,12 +1337,14 @@ def _clean_session_id(session_id: str | None) -> str | None:
 
 def _public_account(account: dict[str, Any]) -> dict[str, Any]:
     profile_picture = account.get("profilePicture", account.get("profile_picture"))
+    is_admin = _is_admin_account(account)
     return {
         "username": str(account["username"]),
         "profilePicture": str(profile_picture) if profile_picture else None,
         "createdAt": int(account["createdAt"]),
         "lastSeenAt": int(account["lastSeenAt"]),
-        "canResetRateLimits": _is_rate_limit_admin(account),
+        "isAdmin": is_admin,
+        "canResetRateLimits": is_admin,
     }
 
 
@@ -1136,8 +1358,57 @@ def _rate_limit_policy(account: dict[str, Any] | None) -> tuple[str, int]:
     return GLOBAL_SIGNED_IN_RATE_LIMIT_IDENTITY, RATE_LIMIT_LIMIT
 
 
-def _is_rate_limit_admin(account: dict[str, Any] | None) -> bool:
-    return bool(account and str(account.get("username", "")).casefold() == RATE_LIMIT_ADMIN_USERNAME)
+def _is_admin_account(account: dict[str, Any] | None) -> bool:
+    if not account:
+        return False
+    username = str(account.get("username", ""))
+    return bool(account.get("isAdmin")) or username.casefold() == DEFAULT_ADMIN_USERNAME.casefold()
+
+
+def _public_platform(platform: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "available": bool(platform.get("available", True)),
+        "updatedAt": int(platform.get("updatedAt", _now_ms())),
+    }
+
+
+def _public_ban(ban: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not ban:
+        return None
+    return {
+        "kind": str(ban.get("kind", "")),
+        "target": str(ban.get("target", "")),
+        "reason": str(ban.get("reason", "")) or "Access was restricted by Learny moderation.",
+        "createdAt": int(ban.get("createdAt", _now_ms())),
+        "createdBy": str(ban.get("createdBy", "")),
+    }
+
+
+def _public_admin_account(account: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "username": str(account["username"]),
+        "profilePicture": account.get("profilePicture"),
+        "createdAt": int(account["createdAt"]),
+        "lastSeenAt": int(account["lastSeenAt"]),
+        "isAdmin": bool(account.get("isAdmin")),
+        "chatCount": int(account.get("chatCount", 0)),
+        "messageCount": int(account.get("messageCount", 0)),
+        "ban": _public_ban(account.get("ban")),
+    }
+
+
+def _admin_portal_payload(database: Any) -> dict[str, Any]:
+    accounts = [_public_admin_account(account) for account in database.list_accounts()]
+    admins = [_public_admin_account(account) for account in database.list_admins()]
+    bans = [_public_ban(ban) for ban in database.list_bans()]
+    return {
+        "adminPortal": {
+            "platform": _public_platform(database.platform_state()),
+            "accounts": accounts,
+            "admins": admins,
+            "bans": [ban for ban in bans if ban is not None],
+        }
+    }
 
 
 def _public_rate_limit(rate_limit: dict[str, Any]) -> dict[str, Any]:

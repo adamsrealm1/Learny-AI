@@ -394,6 +394,155 @@ class AccountWebTests(unittest.TestCase):
         self.assertFalse(account["account"]["canResetRateLimits"])
         self.assertEqual(denied["status"], 403)
 
+    def test_admin_portal_lists_accounts_and_admins(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            portal = server.get_json("/api/admin/portal")["adminPortal"]
+
+        self.assertFalse(portal["platform"]["available"] is False)
+        self.assertEqual([account["username"] for account in portal["accounts"]], ["adamsrealm1"])
+        self.assertEqual([account["username"] for account in portal["admins"]], ["adamsrealm1"])
+
+    def test_non_admin_cannot_open_admin_portal_or_make_admin_changes(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "regular_portal_user", "password": "strong-password"},
+            )
+            portal = server.get_json_status("/api/admin/portal")
+            platform_change = server.post_json_status("/api/admin/platform", {"available": False})
+            role_change = server.post_json_status(
+                "/api/admin/role",
+                {"username": "regular_portal_user", "admin": True},
+            )
+
+        self.assertEqual(portal["status"], 403)
+        self.assertEqual(platform_change["status"], 403)
+        self.assertEqual(role_change["status"], 403)
+
+    def test_admin_can_grant_admin_portal_access(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "portal_user", "password": "strong-password"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            promoted = server.post_json(
+                "/api/admin/role",
+                {"username": "portal_user", "admin": True},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            login = server.post_json(
+                "/api/accounts/sign-in",
+                {"username": "portal_user", "password": "strong-password"},
+            )
+            portal = server.get_json("/api/admin/portal")
+
+        self.assertTrue(promoted["updatedAccount"]["isAdmin"])
+        self.assertTrue(login["account"]["isAdmin"])
+        self.assertIn("adminPortal", portal)
+
+    def test_admin_can_make_learny_unavailable_without_calling_generator(self) -> None:
+        CountingAnswerGenerator.calls = 0
+        with run_account_server(CountingAnswerGenerator) as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            portal = server.post_json("/api/admin/platform", {"available": False})["adminPortal"]
+            blocked = server.post_json_status(
+                "/api/ask",
+                {"message": "hello", "chatId": "down-chat", "sessionId": "down-session"},
+            )
+
+        self.assertFalse(portal["platform"]["available"])
+        self.assertEqual(blocked["status"], 503)
+        self.assertFalse(blocked["data"]["platform"]["available"])
+        self.assertEqual(CountingAnswerGenerator.calls, 0)
+
+    def test_admin_username_ban_blocks_existing_account(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "ban_target", "password": "strong-password"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            portal = server.post_json(
+                "/api/admin/ban",
+                {
+                    "kind": "username",
+                    "target": "ban_target",
+                    "reason": "Testing the moderation lock.",
+                },
+            )["adminPortal"]
+            server.post_json("/api/accounts/sign-out", {})
+            blocked = server.post_json_status(
+                "/api/accounts/sign-in",
+                {"username": "ban_target", "password": "strong-password"},
+            )
+
+        self.assertEqual(len(portal["bans"]), 1)
+        self.assertEqual(blocked["status"], 403)
+        self.assertEqual(blocked["data"]["ban"]["target"], "ban_target")
+        self.assertEqual(blocked["data"]["ban"]["reason"], "Testing the moderation lock.")
+
+    def test_admin_ip_ban_blocks_matching_forwarded_address(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            portal = server.post_json(
+                "/api/admin/ban",
+                {
+                    "kind": "ip",
+                    "target": "203.0.113.77",
+                    "reason": "Blocked network test.",
+                },
+            )["adminPortal"]
+            blocked = server.post_json_status(
+                "/api/ask",
+                {"message": "hello", "chatId": "ip-ban-chat", "sessionId": "ip-ban-session"},
+                {"X-Forwarded-For": "203.0.113.77"},
+            )
+
+        self.assertEqual(len(portal["bans"]), 1)
+        self.assertEqual(blocked["status"], 403)
+        self.assertEqual(blocked["data"]["ban"]["kind"], "ip")
+        self.assertEqual(blocked["data"]["ban"]["target"], "203.0.113.77")
+        self.assertEqual(blocked["data"]["ban"]["reason"], "Blocked network test.")
+
+    def test_admin_can_delete_account_by_username(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "remove_me", "password": "strong-password"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            deleted = server.post_json(
+                "/api/admin/delete-account",
+                {"username": "remove_me"},
+            )
+            portal = deleted["adminPortal"]
+
+        self.assertTrue(deleted["deleted"])
+        self.assertNotIn("remove_me", [account["username"] for account in portal["accounts"]])
+
     def test_failed_answer_does_not_consume_rate_limit_or_save_chat_messages(self) -> None:
         with run_account_server(NoAnswerGenerator) as server:
             server.post_json(
@@ -521,6 +670,24 @@ class run_account_server:
     def get_json(self, path: str) -> dict[str, Any]:
         with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
+
+    def get_json_status(self, path: str) -> dict[str, Any]:
+        try:
+            with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:
+                return {
+                    "status": int(response.status),
+                    "data": json.loads(response.read().decode("utf-8")),
+                    "headers": response.headers,
+                }
+        except urllib.error.HTTPError as error:
+            try:
+                return {
+                    "status": int(error.code),
+                    "data": json.loads(error.read().decode("utf-8")),
+                    "headers": error.headers,
+                }
+            finally:
+                error.close()
 
     def post_json(
         self,
