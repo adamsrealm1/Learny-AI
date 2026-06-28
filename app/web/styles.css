@@ -1523,6 +1523,8 @@ body.account-modal-open {
   grid-template-columns: minmax(0, 1fr) 28px;
   align-items: center;
   gap: 4px;
+  width: 100%;
+  max-width: 100%;
   min-height: 42px;
   padding: 5px 4px 5px 10px;
   border: 1px solid transparent;
@@ -1557,7 +1559,7 @@ body.account-modal-open {
   box-shadow:
     0 12px 26px rgba(0, 0, 0, 0.2),
     inset 0 1px rgba(255, 255, 255, 0.08);
-  transform: translateX(3px);
+  transform: none;
 }
 
 .chat-item:hover::before,
@@ -1823,6 +1825,7 @@ body.account-modal-open {
 
 .admin-panel {
   display: grid;
+  align-content: start;
   gap: 14px;
   min-width: 0;
   padding: 18px;
@@ -1922,6 +1925,7 @@ body.account-modal-open {
 .admin-list,
 .admin-ban-list {
   display: grid;
+  align-content: start;
   gap: 8px;
   min-width: 0;
 }
@@ -2002,6 +2006,11 @@ body.account-modal-open {
 .admin-badge.admin {
   color: #deecff;
   background: rgba(83, 144, 255, 0.18);
+}
+
+.admin-badge.rate-limit {
+  color: #f3f6ff;
+  background: rgba(255, 255, 255, 0.11);
 }
 
 .admin-badge.banned {

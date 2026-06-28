@@ -515,11 +515,42 @@ class AccountWebTests(unittest.TestCase):
                 "/api/accounts/create",
                 {"username": "adamsrealm1", "password": "strong-password"},
             )
+            for index in range(2):
+                server.post_json(
+                    "/api/ask",
+                    {"message": f"portal rate setup {index}", "chatId": "portal-rate-chat"},
+                )
             portal = server.get_json("/api/admin/portal")["adminPortal"]
 
         self.assertFalse(portal["platform"]["available"] is False)
         self.assertEqual([account["username"] for account in portal["accounts"]], ["adamsrealm1"])
         self.assertEqual([account["username"] for account in portal["admins"]], ["adamsrealm1"])
+        self.assertEqual(portal["accounts"][0]["rateLimit"]["remaining"], 198)
+        self.assertEqual(portal["accounts"][0]["rateLimitPercent"], 99)
+
+    def test_admin_can_reset_rate_limit_for_username_from_admin_portal(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            for index in range(3):
+                server.post_json(
+                    "/api/ask",
+                    {"message": f"admin user reset setup {index}", "chatId": "admin-user-reset"},
+                )
+            before_reset = server.get_json("/api/admin/portal")["adminPortal"]["accounts"][0]
+            reset = server.post_json(
+                "/api/admin/rate-limit/reset",
+                {"username": "adamsrealm1"},
+            )
+            after_reset = reset["adminPortal"]["accounts"][0]
+
+        self.assertEqual(before_reset["rateLimit"]["remaining"], 197)
+        self.assertGreaterEqual(reset["deleted"], 3)
+        self.assertEqual(reset["resetRateLimit"]["remaining"], 200)
+        self.assertEqual(after_reset["rateLimit"]["remaining"], 200)
+        self.assertEqual(after_reset["rateLimitPercent"], 100)
 
     def test_non_admin_cannot_open_admin_portal_or_make_admin_changes(self) -> None:
         with run_account_server() as server:
@@ -529,6 +560,10 @@ class AccountWebTests(unittest.TestCase):
             )
             portal = server.get_json_status("/api/admin/portal")
             platform_change = server.post_json_status("/api/admin/platform", {"available": False})
+            rate_limit_reset = server.post_json_status(
+                "/api/admin/rate-limit/reset",
+                {"username": "regular_portal_user"},
+            )
             role_change = server.post_json_status(
                 "/api/admin/role",
                 {"username": "regular_portal_user", "admin": True},
@@ -536,6 +571,7 @@ class AccountWebTests(unittest.TestCase):
 
         self.assertEqual(portal["status"], 403)
         self.assertEqual(platform_change["status"], 403)
+        self.assertEqual(rate_limit_reset["status"], 403)
         self.assertEqual(role_change["status"], 403)
 
     def test_owner_admin_can_grant_admin_portal_access(self) -> None:

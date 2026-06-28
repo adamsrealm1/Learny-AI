@@ -286,6 +286,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             if route == "/api/admin/platform":
                 self._handle_admin_platform()
                 return
+            if route == "/api/admin/rate-limit/reset":
+                self._handle_admin_reset_rate_limit()
+                return
             if route == "/api/admin/ban":
                 self._handle_admin_ban()
                 return
@@ -588,6 +591,35 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(_admin_portal_payload(database))
+
+        def _handle_admin_reset_rate_limit(self) -> None:
+            admin = self._require_admin_account()
+            if admin is None:
+                return
+            try:
+                body = self._read_json_body()
+                username = _required_string(body, "username")
+                target_account = _account_by_username(database, username)
+                if target_account is None:
+                    raise AccountError("Account could not be found.")
+                rate_limit_identity, rate_limit_size = _rate_limit_policy(target_account)
+                deleted = database.clear_rate_limit(rate_limit_identity)
+                rate_limit = database.peek_rate_limit(
+                    rate_limit_identity,
+                    limit=rate_limit_size,
+                    window_ms=RATE_LIMIT_WINDOW_MS,
+                )
+            except (ValueError, AccountError):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
+                return
+            self._send_json(
+                {
+                    **_admin_portal_payload(database),
+                    "deleted": deleted,
+                    "rateLimit": _public_rate_limit(rate_limit),
+                    "resetRateLimit": _public_rate_limit(rate_limit),
+                }
+            )
 
         def _handle_admin_ban(self) -> None:
             admin = self._require_admin_account()
@@ -1578,6 +1610,13 @@ def _account_lookup(database: Any) -> dict[str, dict[str, Any]]:
     }
 
 
+def _account_by_username(database: Any, username: str) -> dict[str, Any] | None:
+    clean_username = str(username).strip().casefold()
+    if not clean_username:
+        return None
+    return _account_lookup(database).get(clean_username)
+
+
 def _public_ban_from_database(ban: dict[str, Any] | None, database: Any) -> dict[str, Any] | None:
     return _public_ban(ban, _account_lookup(database))
 
@@ -1609,7 +1648,9 @@ def _public_ban(
 def _public_admin_account(
     account: dict[str, Any],
     account_lookup: dict[str, dict[str, Any]] | None = None,
+    rate_limit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    public_rate_limit = _public_rate_limit(rate_limit) if rate_limit else None
     return {
         "username": str(account["username"]),
         "profilePicture": account.get("profilePicture"),
@@ -1619,6 +1660,8 @@ def _public_admin_account(
         "chatCount": int(account.get("chatCount", 0)),
         "messageCount": int(account.get("messageCount", 0)),
         "ban": _public_ban(account.get("ban"), account_lookup),
+        "rateLimit": public_rate_limit,
+        "rateLimitPercent": _rate_limit_percent(public_rate_limit),
     }
 
 
@@ -1629,9 +1672,29 @@ def _admin_portal_payload(database: Any) -> dict[str, Any]:
         for account in raw_accounts
         if account and account.get("username")
     }
-    accounts = [_public_admin_account(account, account_lookup) for account in raw_accounts]
+    rate_limits: dict[str, dict[str, Any]] = {}
+    for account in raw_accounts:
+        identity_key, limit = _rate_limit_policy(account)
+        if identity_key not in rate_limits:
+            rate_limits[identity_key] = database.peek_rate_limit(
+                identity_key,
+                limit=limit,
+                window_ms=RATE_LIMIT_WINDOW_MS,
+            )
+    accounts = [
+        _public_admin_account(
+            account,
+            account_lookup,
+            rate_limits.get(_rate_limit_policy(account)[0]),
+        )
+        for account in raw_accounts
+    ]
     admins = [
-        _public_admin_account(account, account_lookup)
+        _public_admin_account(
+            account,
+            account_lookup,
+            rate_limits.get(_rate_limit_policy(account)[0]),
+        )
         for account in raw_accounts
         if account.get("isAdmin")
     ]
@@ -1654,6 +1717,16 @@ def _public_rate_limit(rate_limit: dict[str, Any]) -> dict[str, Any]:
         "resetAt": int(rate_limit["resetAt"]),
         "limited": bool(rate_limit["limited"]),
     }
+
+
+def _rate_limit_percent(rate_limit: dict[str, Any] | None) -> int:
+    if not rate_limit:
+        return 100
+    limit = int(rate_limit.get("limit", 0))
+    remaining = int(rate_limit.get("remaining", 0))
+    if limit <= 0 or remaining <= 0:
+        return 0
+    return max(1, min(100, round((remaining / limit) * 100)))
 
 
 def _retry_after_header(rate_limit: dict[str, Any]) -> tuple[str, str]:

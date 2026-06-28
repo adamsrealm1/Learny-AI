@@ -60,6 +60,7 @@ const adminUnbanUsernameForm = document.querySelector("#adminUnbanUsernameForm")
 const adminBanIpForm = document.querySelector("#adminBanIpForm");
 const adminUnbanIpForm = document.querySelector("#adminUnbanIpForm");
 const adminDeleteAccountForm = document.querySelector("#adminDeleteAccountForm");
+const adminResetRateLimitForm = document.querySelector("#adminResetRateLimitForm");
 const adminGrantForm = document.querySelector("#adminGrantForm");
 const adminRevokeForm = document.querySelector("#adminRevokeForm");
 const banLock = document.querySelector("#banLock");
@@ -1755,6 +1756,19 @@ function accountImageSource(account) {
     : PROFILE_ICON_PATH;
 }
 
+function adminAccountRateLimitPercent(account) {
+  const explicitPercent = Number(account && account.rateLimitPercent);
+  if (Number.isFinite(explicitPercent)) {
+    return Math.max(0, Math.min(100, Math.round(explicitPercent)));
+  }
+  const rateLimit = account && account.rateLimit;
+  if (!rateLimit || !Number.isFinite(rateLimit.limit) || rateLimit.limit <= 0) {
+    return 100;
+  }
+  const remaining = Number.isFinite(rateLimit.remaining) ? rateLimit.remaining : rateLimit.limit;
+  return Math.max(0, Math.min(100, Math.round((remaining / rateLimit.limit) * 100)));
+}
+
 function renderAdminAccountRow(account, { compact = false } = {}) {
   const row = document.createElement("article");
   row.className = "admin-account-row";
@@ -1774,6 +1788,12 @@ function renderAdminAccountRow(account, { compact = false } = {}) {
     : `${account.chatCount || 0} chats - ${account.messageCount || 0} messages`;
   const badges = document.createElement("div");
   badges.className = "admin-badges";
+  if (!compact) {
+    const rateBadge = document.createElement("span");
+    rateBadge.className = "admin-badge rate-limit";
+    rateBadge.textContent = `${adminAccountRateLimitPercent(account)}% rate limit`;
+    badges.append(rateBadge);
+  }
   if (account.isAdmin) {
     const badge = document.createElement("span");
     badge.className = "admin-badge admin";
@@ -3035,6 +3055,9 @@ function consumeApiState(data) {
   if (data.ban) {
     updateBanState(data.ban);
   }
+  if (data.rateLimit) {
+    updateRateLimit(data.rateLimit);
+  }
 }
 
 function sleep(milliseconds) {
@@ -3634,6 +3657,12 @@ bindAdminForm(adminUnbanIpForm, (formData) =>
 
 bindAdminForm(adminDeleteAccountForm, (formData) =>
   submitAdminJson("/api/admin/delete-account", {
+    username: String(formData.get("username") || "").trim(),
+  }),
+);
+
+bindAdminForm(adminResetRateLimitForm, (formData) =>
+  submitAdminJson("/api/admin/rate-limit/reset", {
     username: String(formData.get("username") || "").trim(),
   }),
 );

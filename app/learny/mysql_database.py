@@ -671,6 +671,16 @@ class MySQLLearnyDatabase:
                 cursor.execute("DELETE FROM rate_limit_events")
                 return int(cursor.rowcount)
 
+    def clear_rate_limit(self, identity_key: str) -> int:
+        clean_identity_key = _clean_rate_limit_identity(identity_key)
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM rate_limit_events WHERE identity_key = %s",
+                    (clean_identity_key,),
+                )
+                return int(cursor.rowcount)
+
     def _rate_limit_snapshot(
         self,
         cursor: Any,
