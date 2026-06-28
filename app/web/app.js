@@ -69,9 +69,8 @@ const banLockAdminName = document.querySelector("#banLockAdminName");
 const banLockTarget = document.querySelector("#banLockTarget");
 const banLockDate = document.querySelector("#banLockDate");
 const banLockReason = document.querySelector("#banLockReason");
-const accountModal = document.querySelector("#accountModal");
-const accountModalBackdrop = document.querySelector("#accountModalBackdrop");
-const accountModalClose = document.querySelector("#accountModalClose");
+const accountModal = document.querySelector("#accountInterface");
+const accountBackButton = document.querySelector("#accountBackButton");
 const accountModalTitle = document.querySelector("#accountModalTitle");
 const accountModalSubtitle = document.querySelector("#accountModalSubtitle");
 const accountModalViews = document.querySelectorAll("[data-account-view]");
@@ -1737,19 +1736,31 @@ function renderPlatformState() {
 }
 
 function setMainView(view) {
-  const nextView = view === "admin" && isCurrentAdmin() ? "admin" : "chat";
+  const nextView =
+    view === "account"
+      ? "account"
+      : view === "admin" && isCurrentAdmin()
+        ? "admin"
+        : "chat";
   activeView = nextView;
+  if (appShell) {
+    appShell.classList.toggle("account-mode", nextView === "account");
+  }
   if (mainArea) {
     mainArea.classList.toggle("admin-mode", nextView === "admin");
+    mainArea.classList.toggle("account-mode", nextView === "account");
   }
   if (chatPanel) {
-    chatPanel.hidden = nextView === "admin";
+    chatPanel.hidden = nextView !== "chat";
   }
   if (adminPortal) {
     adminPortal.hidden = nextView !== "admin";
   }
+  if (accountModal) {
+    accountModal.hidden = nextView !== "account";
+  }
   if (messageSearch) {
-    messageSearch.hidden = nextView === "admin";
+    messageSearch.hidden = nextView !== "chat";
   }
   if (adminButton) {
     adminButton.classList.toggle("active", nextView === "admin");
@@ -1757,7 +1768,7 @@ function setMainView(view) {
   closeSidebarOnMobile();
   if (nextView === "admin") {
     loadAdminPortal();
-  } else if (messageInput && !DIRECT_FILE_MODE && !isPlatformUnavailable()) {
+  } else if (nextView === "chat" && messageInput && !DIRECT_FILE_MODE && !isPlatformUnavailable()) {
     messageInput.focus();
   }
 }
@@ -2037,6 +2048,9 @@ function showAccountView(view) {
   }
 
   activeAccountView = nextView;
+  if (accountModal) {
+    accountModal.dataset.activeAccountView = nextView;
+  }
   resetDeleteConfirmation();
   setAccountFormMessage(signInMessage);
   setAccountFormMessage(createAccountMessage);
@@ -2086,17 +2100,14 @@ function openAccountModal(view = currentAccount ? "myaccount" : "sign-in") {
     return;
   }
 
-  closeSidebarOnMobile();
-  accountModal.hidden = false;
-  document.body.classList.add("account-modal-open");
+  setMainView("account");
   showAccountView(view);
   window.setTimeout(() => {
     const firstInput = accountModal.querySelector("[data-account-view]:not([hidden]) input:not([hidden])");
-    const closeButton = accountModalClose;
     if (firstInput instanceof HTMLElement) {
       firstInput.focus();
-    } else if (closeButton) {
-      closeButton.focus();
+    } else if (accountBackButton) {
+      accountBackButton.focus();
     }
   }, 80);
   if (activeAccountView === "myaccount") {
@@ -2109,9 +2120,9 @@ function closeAccountModal() {
     return;
   }
 
-  accountModal.hidden = true;
-  document.body.classList.remove("account-modal-open");
+  setMainView("chat");
   activeAccountView = "";
+  accountModal.dataset.activeAccountView = "";
   resetDeleteConfirmation();
   if (messageInput && !DIRECT_FILE_MODE) {
     messageInput.focus();
@@ -3711,12 +3722,8 @@ document.querySelectorAll("[data-open-account-view]").forEach((button) => {
   });
 });
 
-if (accountModalBackdrop) {
-  accountModalBackdrop.addEventListener("click", () => closeAccountModal());
-}
-
-if (accountModalClose) {
-  accountModalClose.addEventListener("click", () => closeAccountModal());
+if (accountBackButton) {
+  accountBackButton.addEventListener("click", () => closeAccountModal());
 }
 
 if (rateLimitBackdrop) {
