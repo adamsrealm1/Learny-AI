@@ -63,6 +63,8 @@ const adminDeleteAccountForm = document.querySelector("#adminDeleteAccountForm")
 const adminGrantForm = document.querySelector("#adminGrantForm");
 const adminRevokeForm = document.querySelector("#adminRevokeForm");
 const banLock = document.querySelector("#banLock");
+const banLockAdminImage = document.querySelector("#banLockAdminImage");
+const banLockAdminName = document.querySelector("#banLockAdminName");
 const banLockTarget = document.querySelector("#banLockTarget");
 const banLockDate = document.querySelector("#banLockDate");
 const banLockReason = document.querySelector("#banLockReason");
@@ -1023,6 +1025,14 @@ function renderBanLock() {
     return;
   }
 
+  const createdByAccount = currentBan.createdByAccount || {};
+  const createdByName = createdByAccount.username || currentBan.createdBy || "Unknown admin";
+  if (banLockAdminImage) {
+    banLockAdminImage.src = createdByAccount.profilePicture || PROFILE_ICON_PATH;
+  }
+  if (banLockAdminName) {
+    banLockAdminName.textContent = createdByName;
+  }
   if (banLockTarget) {
     const prefix = currentBan.kind === "username" ? "@" : "";
     banLockTarget.textContent = `${prefix}${currentBan.target || "Unknown"}`;
@@ -1785,7 +1795,7 @@ function renderAdminAccountRow(account, { compact = false } = {}) {
           account.ban ? "/api/admin/unban" : "/api/admin/ban",
           account.ban
             ? { kind: "username", target: account.username }
-            : { kind: "username", target: account.username, reason: "Banned from the Admin Portal." },
+            : { kind: "username", target: account.username, reason: "No reason." },
         ),
       ),
       createAdminMiniAction("Delete", () =>

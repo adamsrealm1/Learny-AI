@@ -516,6 +516,11 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(CountingAnswerGenerator.calls, 0)
 
     def test_admin_username_ban_blocks_existing_account(self) -> None:
+        admin_profile_picture = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+            "AAAADUlEQVR42mP8z8BQDwAFgwJ/lF4Q2wAAAABJRU5ErkJggg=="
+        )
         with run_account_server() as server:
             server.post_json(
                 "/api/accounts/create",
@@ -525,6 +530,10 @@ class AccountWebTests(unittest.TestCase):
             server.post_json(
                 "/api/accounts/create",
                 {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            server.post_json(
+                "/api/account/profile-picture",
+                {"profilePicture": admin_profile_picture},
             )
             portal = server.post_json(
                 "/api/admin/ban",
@@ -544,6 +553,12 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(blocked["status"], 403)
         self.assertEqual(blocked["data"]["ban"]["target"], "ban_target")
         self.assertEqual(blocked["data"]["ban"]["reason"], "Testing the moderation lock.")
+        self.assertEqual(blocked["data"]["ban"]["createdBy"], "adamsrealm1")
+        self.assertEqual(blocked["data"]["ban"]["createdByAccount"]["username"], "adamsrealm1")
+        self.assertEqual(
+            blocked["data"]["ban"]["createdByAccount"]["profilePicture"],
+            admin_profile_picture,
+        )
 
     def test_admin_ip_ban_blocks_matching_forwarded_address(self) -> None:
         with run_account_server() as server:

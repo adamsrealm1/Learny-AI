@@ -114,7 +114,7 @@
         }
       }
     </style>
-    <link rel="stylesheet" href="./app/web/styles.css?v=admin-centerless1">
+    <link rel="stylesheet" href="./app/web/styles.css?v=ban-actor1">
   </head>
   <body class="site-loading">
     <div class="loading-screen" id="loadingScreen" role="status" aria-label="Loading Learny AI">
@@ -392,6 +392,13 @@
     <div class="ban-lock" id="banLock" hidden>
       <section class="ban-lock-card" role="alert" aria-live="assertive">
         <h1>Your account is suspended</h1>
+        <div class="ban-lock-admin">
+          <img id="banLockAdminImage" src="./app/icon_library/profile.png" alt="">
+          <div>
+            <span>Banned by</span>
+            <strong id="banLockAdminName">Unknown admin</strong>
+          </div>
+        </div>
         <dl>
           <div>
             <dt>User Banned</dt>
@@ -590,6 +597,6 @@
     </template>
 
     <script src="./app/web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./app/web/app.js?v=owner-admin-roles1" defer></script>
+    <script src="./app/web/app.js?v=ban-actor1" defer></script>
   </body>
 </html>

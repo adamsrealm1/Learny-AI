@@ -352,7 +352,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                         "account": None,
                         "stats": None,
                         "platform": _public_platform(platform),
-                        "ban": _public_ban(ban) if ban else None,
+                        "ban": _public_ban_from_database(ban, database) if ban else None,
                     },
                     HTTPStatus.FORBIDDEN if ban else HTTPStatus.OK,
                 )
@@ -364,7 +364,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     "account": _public_account(account),
                     "stats": database.account_stats(int(account["id"])),
                     "platform": _public_platform(platform),
-                    "ban": _public_ban(ban) if ban else None,
+                    "ban": _public_ban_from_database(ban, database) if ban else None,
                 }
             )
 
@@ -375,7 +375,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 {
                     "platform": _public_platform(platform),
-                    "ban": _public_ban(ban) if ban else None,
+                    "ban": _public_ban_from_database(ban, database) if ban else None,
                     "account": _public_account(account) if account else None,
                 },
                 HTTPStatus.FORBIDDEN if ban else HTTPStatus.OK,
@@ -893,7 +893,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 {
                     "error": GENERIC_ERROR_MESSAGE,
                     "retryable": False,
-                    "ban": _public_ban(ban),
+                    "ban": _public_ban_from_database(ban, database),
                     "platform": _public_platform(database.platform_state()),
                 },
                 HTTPStatus.FORBIDDEN,
@@ -1566,19 +1566,50 @@ def _public_platform(platform: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _public_ban(ban: dict[str, Any] | None) -> dict[str, Any] | None:
+def _account_lookup(database: Any) -> dict[str, dict[str, Any]]:
+    try:
+        accounts = database.list_accounts()
+    except Exception:
+        return {}
+    return {
+        str(account.get("username", "")).casefold(): account
+        for account in accounts
+        if account and account.get("username")
+    }
+
+
+def _public_ban_from_database(ban: dict[str, Any] | None, database: Any) -> dict[str, Any] | None:
+    return _public_ban(ban, _account_lookup(database))
+
+
+def _public_ban(
+    ban: dict[str, Any] | None,
+    account_lookup: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     if not ban:
         return None
+    created_by = str(ban.get("createdBy", "")).strip()
+    actor_account = None
+    if created_by:
+        account = (account_lookup or {}).get(created_by.casefold())
+        actor_account = {
+            "username": str(account.get("username", created_by)) if account else created_by,
+            "profilePicture": account.get("profilePicture") if account else None,
+        }
     return {
         "kind": str(ban.get("kind", "")),
         "target": str(ban.get("target", "")),
         "reason": str(ban.get("reason", "")) or "Access was restricted by Learny moderation.",
         "createdAt": int(ban.get("createdAt", _now_ms())),
-        "createdBy": str(ban.get("createdBy", "")),
+        "createdBy": created_by,
+        "createdByAccount": actor_account,
     }
 
 
-def _public_admin_account(account: dict[str, Any]) -> dict[str, Any]:
+def _public_admin_account(
+    account: dict[str, Any],
+    account_lookup: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     return {
         "username": str(account["username"]),
         "profilePicture": account.get("profilePicture"),
@@ -1587,14 +1618,24 @@ def _public_admin_account(account: dict[str, Any]) -> dict[str, Any]:
         "isAdmin": bool(account.get("isAdmin")),
         "chatCount": int(account.get("chatCount", 0)),
         "messageCount": int(account.get("messageCount", 0)),
-        "ban": _public_ban(account.get("ban")),
+        "ban": _public_ban(account.get("ban"), account_lookup),
     }
 
 
 def _admin_portal_payload(database: Any) -> dict[str, Any]:
-    accounts = [_public_admin_account(account) for account in database.list_accounts()]
-    admins = [_public_admin_account(account) for account in database.list_admins()]
-    bans = [_public_ban(ban) for ban in database.list_bans()]
+    raw_accounts = database.list_accounts()
+    account_lookup = {
+        str(account.get("username", "")).casefold(): account
+        for account in raw_accounts
+        if account and account.get("username")
+    }
+    accounts = [_public_admin_account(account, account_lookup) for account in raw_accounts]
+    admins = [
+        _public_admin_account(account, account_lookup)
+        for account in raw_accounts
+        if account.get("isAdmin")
+    ]
+    bans = [_public_ban(ban, account_lookup) for ban in database.list_bans()]
     return {
         "adminPortal": {
             "platform": _public_platform(database.platform_state()),

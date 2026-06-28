@@ -359,21 +359,6 @@ input:focus-visible {
   font-size: 0.7rem;
 }
 
-.admin-nav-mark {
-  display: grid;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  place-items: center;
-  color: #eaf2ff;
-  background: linear-gradient(135deg, #314dff, #66c7ff);
-  box-shadow:
-    0 12px 26px rgba(75, 112, 255, 0.32),
-    inset 0 1px rgba(255, 255, 255, 0.34);
-  font-size: 0.78rem;
-  font-weight: 850;
-}
-
 .account-orb {
   display: block;
   width: 34px;
@@ -3042,6 +3027,49 @@ body.ban-lock-active .loading-screen {
   font-size: clamp(1.7rem, 5vw, 2.8rem);
   line-height: 1.05;
   letter-spacing: 0;
+}
+
+.ban-lock-admin {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  margin-top: 22px;
+  padding: 13px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.ban-lock-admin img {
+  display: block;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: center;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ban-lock-admin div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ban-lock-admin span {
+  color: rgba(180, 202, 255, 0.66);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ban-lock-admin strong {
+  overflow: hidden;
+  color: rgba(250, 252, 255, 0.96);
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ban-lock-card dl {
