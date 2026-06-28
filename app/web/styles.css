@@ -3014,7 +3014,7 @@ body.ban-lock-active .loading-screen {
 .ban-lock-card {
   width: min(560px, 100%);
   padding: 32px;
-  border: 1px solid rgba(0, 4, 35, 0.909);
+  border: 1px solid rgb(0, 16, 135);
   border-radius: 26px;
   color: #f5f8ff;
   background:
