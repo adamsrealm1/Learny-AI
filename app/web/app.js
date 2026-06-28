@@ -1552,7 +1552,10 @@ function closeAttachmentAuthPopup() {
 }
 
 function attachmentVerificationIsValid() {
-  return Boolean(attachmentVerificationToken && Date.now() < attachmentVerificationExpiresAt);
+  return Boolean(
+    (currentAccount && currentAccount.attachmentsVerified) ||
+      (attachmentVerificationToken && Date.now() < attachmentVerificationExpiresAt),
+  );
 }
 
 function clearAttachmentVerification() {
@@ -1625,6 +1628,14 @@ async function handleAttachmentAuthSubmit(event) {
     );
     if (!data.attachmentVerification || !data.attachmentVerification.token) {
       throw new Error(GENERIC_ERROR_MESSAGE);
+    }
+    if (data.account) {
+      currentAccount = data.account;
+      currentAccountStats = data.stats || currentAccountStats;
+      updateAccountButton();
+      renderAccountModalDetails();
+    } else if (currentAccount) {
+      currentAccount = { ...currentAccount, attachmentsVerified: true };
     }
     attachmentVerificationToken = data.attachmentVerification.token;
     attachmentVerificationExpiresAt = Number(data.attachmentVerification.expiresAt) || 0;

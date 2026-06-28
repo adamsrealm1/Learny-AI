@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import hashlib
 import html
 import io
 import json
@@ -393,7 +394,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 _admin_portal_payload(
                     database,
-                    _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                    self._locked_rate_limit_time_zone(admin),
                 )
             )
 
@@ -504,13 +505,18 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
                 return
 
+            updated_account = database.mark_attachments_verified(int(account["id"]))
             verification = attachment_verifications.create(int(account["id"]))
             self._send_json(
                 {
                     "ok": True,
+                    "authenticated": True,
+                    "account": _public_account(updated_account),
+                    "stats": database.account_stats(int(account["id"])),
                     "attachmentVerification": {
                         "token": verification["token"],
                         "expiresAt": verification["expiresAt"],
+                        "verified": True,
                     },
                 }
             )
@@ -548,7 +554,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
             deleted = database.clear_rate_limits()
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            time_zone = _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
+            time_zone = self._locked_rate_limit_time_zone(account)
             rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
@@ -572,7 +578,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self._send_ban_response(ban)
                 return
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            time_zone = _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
+            time_zone = self._locked_rate_limit_time_zone(account)
             rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
@@ -601,7 +607,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 _admin_portal_payload(
                     database,
-                    _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                    self._locked_rate_limit_time_zone(admin),
                 )
             )
 
@@ -615,7 +621,11 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 target_account = _account_by_username(database, username)
                 if target_account is None:
                     raise AccountError("Account could not be found.")
-                time_zone = _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
+                admin_time_zone = self._locked_rate_limit_time_zone(admin)
+                time_zone = database.rate_limit_time_zone(
+                    _time_zone_lock_key(target_account, ""),
+                    admin_time_zone,
+                )
                 rate_limit_identity, rate_limit_size = _rate_limit_policy(target_account)
                 deleted = database.clear_rate_limit(rate_limit_identity)
                 rate_limit = database.peek_rate_limit(
@@ -654,7 +664,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 _admin_portal_payload(
                     database,
-                    _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                    self._locked_rate_limit_time_zone(admin),
                 )
             )
 
@@ -674,7 +684,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 _admin_portal_payload(
                     database,
-                    _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                    self._locked_rate_limit_time_zone(admin),
                 )
             )
 
@@ -692,7 +702,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 {
                     **_admin_portal_payload(
                         database,
-                        _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                        self._locked_rate_limit_time_zone(admin),
                     ),
                     "deleted": deleted,
                 }
@@ -718,7 +728,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 {
                     **_admin_portal_payload(
                         database,
-                        _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                        self._locked_rate_limit_time_zone(admin),
                     ),
                     "updatedAccount": _public_account(updated),
                 }
@@ -782,13 +792,16 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                         HTTPStatus.UNAUTHORIZED,
                     )
                     return
-                verification_token = _optional_string(body, "attachmentVerificationToken")
-                if not attachment_verifications.verify(int(account["id"]), verification_token):
-                    self._send_json(
-                        {"error": GENERIC_ERROR_MESSAGE, "retryable": False},
-                        HTTPStatus.FORBIDDEN,
-                    )
-                    return
+                account_id = int(account["id"])
+                if not database.attachments_verified(account_id):
+                    verification_token = _optional_string(body, "attachmentVerificationToken")
+                    if not attachment_verifications.verify(account_id, verification_token):
+                        self._send_json(
+                            {"error": GENERIC_ERROR_MESSAGE, "retryable": False},
+                            HTTPStatus.FORBIDDEN,
+                        )
+                        return
+                    database.mark_attachments_verified(account_id)
             platform = database.platform_state()
             if not platform.get("available", True):
                 self._send_json(
@@ -807,7 +820,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             )
             session_id, session_history = session_store.get(requested_session_id)
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            time_zone = _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
+            time_zone = self._locked_rate_limit_time_zone(account)
             rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
@@ -977,6 +990,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
         def _verify_captcha_from_body(self, body: dict[str, Any]) -> bool:
             return captcha.verify(_optional_string(body, "captchaToken"), self._client_ip())
+
+        def _locked_rate_limit_time_zone(self, account: dict[str, Any] | None) -> str:
+            return database.locked_rate_limit_time_zone(
+                _time_zone_lock_key(account, self._client_ip()),
+                _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+            )
 
         def _client_ip(self) -> str:
             forwarded_for = self.headers.get("X-Forwarded-For", "")
@@ -1602,6 +1621,9 @@ def _clean_session_id(session_id: str | None) -> str | None:
 def _public_account(account: dict[str, Any]) -> dict[str, Any]:
     profile_picture = account.get("profilePicture", account.get("profile_picture"))
     is_admin = _is_admin_account(account)
+    attachments_verified_at = int(
+        account.get("attachmentsVerifiedAt", account.get("attachments_verified_at", 0)) or 0
+    )
     return {
         "username": str(account["username"]),
         "profilePicture": str(profile_picture) if profile_picture else None,
@@ -1609,6 +1631,7 @@ def _public_account(account: dict[str, Any]) -> dict[str, Any]:
         "lastSeenAt": int(account["lastSeenAt"]),
         "isAdmin": is_admin,
         "canResetRateLimits": is_admin,
+        "attachmentsVerified": attachments_verified_at > 0,
     }
 
 
@@ -1619,6 +1642,13 @@ def _rate_session_id(value: str | None) -> str:
 def _request_time_zone(value: str | None) -> str:
     time_zone = str(value or "").strip()
     return time_zone[:80] if time_zone else DEFAULT_RATE_LIMIT_TIME_ZONE
+
+
+def _time_zone_lock_key(account: dict[str, Any] | None, client_ip: str) -> str:
+    if account is not None:
+        return f"account:{int(account['id'])}"
+    ip_digest = hashlib.sha256(str(client_ip or "unknown").encode("utf-8")).hexdigest()
+    return f"guest-ip:{ip_digest}"
 
 
 def _rate_limit_policy(account: dict[str, Any] | None, rate_session_id: str = "") -> tuple[str, int]:
@@ -1728,11 +1758,15 @@ def _admin_portal_payload(
     for account in raw_accounts:
         identity_key, limit = _rate_limit_policy(account)
         if identity_key not in rate_limits:
+            account_time_zone = database.rate_limit_time_zone(
+                _time_zone_lock_key(account, ""),
+                time_zone,
+            )
             rate_limits[identity_key] = database.peek_rate_limit(
                 identity_key,
                 limit=limit,
                 window_ms=RATE_LIMIT_WINDOW_MS,
-                time_zone=time_zone,
+                time_zone=account_time_zone,
             )
     accounts = [
         _public_admin_account(

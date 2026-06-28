@@ -464,8 +464,14 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(second_status["rateLimit"]["remaining"], 200)
 
     def test_rate_limit_reset_time_uses_browser_local_midnight(self) -> None:
-        sydney_headers = {"X-Learny-Time-Zone": "Australia/Sydney"}
-        los_angeles_headers = {"X-Learny-Time-Zone": "America/Los_Angeles"}
+        sydney_headers = {
+            "X-Learny-Time-Zone": "Australia/Sydney",
+            "X-Forwarded-For": "203.0.113.10",
+        }
+        los_angeles_headers = {
+            "X-Learny-Time-Zone": "America/Los_Angeles",
+            "X-Forwarded-For": "203.0.113.11",
+        }
         with run_account_server() as server:
             guest_status = server.get_json("/api/rate-limit", sydney_headers)["rateLimit"]
             guest_answer = server.post_json(
@@ -517,6 +523,46 @@ class AccountWebTests(unittest.TestCase):
             (los_angeles_reset.hour, los_angeles_reset.minute, los_angeles_reset.second),
             (0, 0, 0),
         )
+
+    def test_signed_in_rate_limit_timezone_stays_locked_to_first_check(self) -> None:
+        sydney_headers = {"X-Learny-Time-Zone": "Australia/Sydney"}
+        los_angeles_headers = {"X-Learny-Time-Zone": "America/Los_Angeles"}
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "locked_tz_user", "password": "strong-password"},
+            )
+            first = server.get_json("/api/rate-limit", sydney_headers)["rateLimit"]
+            changed = server.get_json("/api/rate-limit", los_angeles_headers)["rateLimit"]
+
+        first_reset = datetime.fromtimestamp(
+            first["resetAt"] / 1000,
+            timezone.utc,
+        ).astimezone(ZoneInfo("Australia/Sydney"))
+        self.assertEqual(changed["resetAt"], first["resetAt"])
+        self.assertEqual((first_reset.hour, first_reset.minute, first_reset.second), (0, 0, 0))
+
+    def test_guest_rate_limit_timezone_survives_cookie_session_reset_by_ip(self) -> None:
+        first_headers = {
+            "X-Learny-Time-Zone": "Australia/Sydney",
+            "X-Forwarded-For": "203.0.113.12",
+            "X-Learny-Rate-Session": "first-browser-session",
+        }
+        reset_headers = {
+            "X-Learny-Time-Zone": "America/Los_Angeles",
+            "X-Forwarded-For": "203.0.113.12",
+            "X-Learny-Rate-Session": "fresh-after-clearing-cookies",
+        }
+        with run_account_server() as server:
+            first = server.get_json("/api/rate-limit", first_headers)["rateLimit"]
+            reset = server.get_json("/api/rate-limit", reset_headers)["rateLimit"]
+
+        self.assertEqual(reset["resetAt"], first["resetAt"])
+        reset_time = datetime.fromtimestamp(
+            reset["resetAt"] / 1000,
+            timezone.utc,
+        ).astimezone(ZoneInfo("Australia/Sydney"))
+        self.assertEqual((reset_time.hour, reset_time.minute, reset_time.second), (0, 0, 0))
 
     def test_adamsrealm1_can_reset_everyones_rate_limits(self) -> None:
         with run_account_server() as server:
@@ -925,11 +971,18 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(blocked_delete["status"], 403)
         self.assertTrue(deleted["deleted"])
 
-    def test_attachment_upload_requires_password_captcha_and_verification_token(self) -> None:
+    def test_attachment_upload_requires_one_time_password_captcha_verification(self) -> None:
         with run_account_server(captcha_site_key="test-site", captcha_verifier=lambda token, ip: token == "ok") as server:
             server.post_json(
                 "/api/accounts/create",
                 {"username": "attach_user", "password": "strong-password", "captchaToken": "ok"},
+            )
+            blocked_upload = server.post_multipart_status(
+                "/api/ask",
+                fields={"message": "read this", "chatId": "attach-chat", "sessionId": "attach-session"},
+                filename="note.txt",
+                content_type="text/plain",
+                content=b"hello from file",
             )
             blocked_captcha = server.post_json_status(
                 "/api/attachments/verify",
@@ -943,31 +996,52 @@ class AccountWebTests(unittest.TestCase):
                 "/api/attachments/verify",
                 {"password": "strong-password", "captchaToken": "ok"},
             )
-            blocked_upload = server.post_multipart_status(
-                "/api/ask",
-                fields={"message": "read this", "chatId": "attach-chat", "sessionId": "attach-session"},
-                filename="note.txt",
-                content_type="text/plain",
-                content=b"hello from file",
-            )
             allowed_upload = server.post_multipart(
                 "/api/ask",
                 fields={
                     "message": "read this",
                     "chatId": "attach-chat",
                     "sessionId": "attach-session",
-                    "attachmentVerificationToken": verification["attachmentVerification"]["token"],
                 },
                 filename="note.txt",
                 content_type="text/plain",
                 content=b"hello from file",
             )
+            account = server.get_json("/api/account")
 
+        self.assertEqual(blocked_upload["status"], 403)
         self.assertEqual(blocked_captcha["status"], 403)
         self.assertEqual(blocked_password["status"], 401)
         self.assertTrue(verification["ok"])
-        self.assertEqual(blocked_upload["status"], 403)
+        self.assertTrue(verification["account"]["attachmentsVerified"])
+        self.assertTrue(account["account"]["attachmentsVerified"])
         self.assertEqual(allowed_upload["answer"], "Stored answer.")
+
+    def test_attachment_verification_survives_new_login_session(self) -> None:
+        with run_account_server(captcha_site_key="test-site", captcha_verifier=lambda token, ip: token == "ok") as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "attach_persistent", "password": "strong-password", "captchaToken": "ok"},
+            )
+            server.post_json(
+                "/api/attachments/verify",
+                {"password": "strong-password", "captchaToken": "ok"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            signed_in = server.post_json(
+                "/api/accounts/sign-in",
+                {"username": "attach_persistent", "password": "strong-password", "captchaToken": "ok"},
+            )
+            upload = server.post_multipart(
+                "/api/ask",
+                fields={"message": "read this again", "chatId": "attach-chat", "sessionId": "attach-session"},
+                filename="note.txt",
+                content_type="text/plain",
+                content=b"hello from persistent file auth",
+            )
+
+        self.assertTrue(signed_in["account"]["attachmentsVerified"])
+        self.assertEqual(upload["answer"], "Stored answer.")
 
 
 class run_account_server:

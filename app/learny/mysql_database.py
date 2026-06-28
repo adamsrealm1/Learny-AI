@@ -110,6 +110,7 @@ class MySQLLearnyDatabase:
                 password_hash VARCHAR(128) NOT NULL,
                 profile_picture MEDIUMTEXT NULL,
                 is_admin TINYINT(1) NOT NULL DEFAULT 0,
+                attachments_verified_at BIGINT NOT NULL DEFAULT 0,
                 created_at BIGINT NOT NULL,
                 last_seen_at BIGINT NOT NULL,
                 PRIMARY KEY (id),
@@ -181,6 +182,14 @@ class MySQLLearnyDatabase:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             """
+            CREATE TABLE IF NOT EXISTS rate_limit_time_zones (
+                lock_key VARCHAR(160) NOT NULL,
+                time_zone VARCHAR(80) NOT NULL,
+                locked_at BIGINT NOT NULL,
+                PRIMARY KEY (lock_key)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """,
+            """
             CREATE TABLE IF NOT EXISTS moderation_bans (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                 kind VARCHAR(16) NOT NULL,
@@ -221,6 +230,14 @@ class MySQLLearnyDatabase:
                 if cursor.fetchone() is None:
                     cursor.execute(
                         "ALTER TABLE accounts ADD COLUMN is_admin TINYINT(1) NOT NULL DEFAULT 0 AFTER profile_picture"
+                    )
+                cursor.execute("SHOW COLUMNS FROM accounts LIKE 'attachments_verified_at'")
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        """
+                        ALTER TABLE accounts
+                        ADD COLUMN attachments_verified_at BIGINT NOT NULL DEFAULT 0 AFTER is_admin
+                        """
                     )
                 cursor.execute(
                     "UPDATE accounts SET is_admin = 1 WHERE username_key = %s",
@@ -277,6 +294,7 @@ class MySQLLearnyDatabase:
             "username": username,
             "profilePicture": None,
             "isAdmin": _is_default_admin_username(username),
+            "attachmentsVerifiedAt": 0,
             "createdAt": now,
             "lastSeenAt": now,
         }
@@ -307,6 +325,7 @@ class MySQLLearnyDatabase:
             "username": str(row["username"]),
             "profilePicture": row.get("profile_picture"),
             "isAdmin": bool(row.get("is_admin")) or _is_default_admin_username(str(row["username"])),
+            "attachmentsVerifiedAt": int(row.get("attachments_verified_at") or 0),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -330,6 +349,40 @@ class MySQLLearnyDatabase:
         expected_hash = _hash_password(password, str(row["password_salt"]))
         return hmac.compare_digest(expected_hash, str(row["password_hash"]))
 
+    def attachments_verified(self, account_id: int) -> bool:
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT attachments_verified_at FROM accounts WHERE id = %s",
+                    (account_id,),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            return False
+        return int(row.get("attachments_verified_at") or 0) > 0
+
+    def mark_attachments_verified(self, account_id: int) -> dict[str, Any]:
+        now = _now_ms()
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE accounts
+                    SET attachments_verified_at = CASE
+                            WHEN attachments_verified_at > 0 THEN attachments_verified_at
+                            ELSE %s
+                        END,
+                        last_seen_at = %s
+                    WHERE id = %s
+                    """,
+                    (now, now, account_id),
+                )
+                cursor.execute("SELECT * FROM accounts WHERE id = %s", (account_id,))
+                row = cursor.fetchone()
+        if row is None:
+            raise AccountError("Account could not be updated.")
+        return _account_from_row(row)
+
     def update_profile_picture(self, account_id: int, profile_picture: str | None) -> dict[str, Any]:
         now = _now_ms()
         with self._lock, self._connect() as connection:
@@ -348,6 +401,7 @@ class MySQLLearnyDatabase:
             "username": str(row["username"]),
             "profilePicture": row.get("profile_picture"),
             "isAdmin": bool(row.get("is_admin")) or _is_default_admin_username(str(row["username"])),
+            "attachmentsVerifiedAt": int(row.get("attachments_verified_at") or 0),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -410,6 +464,7 @@ class MySQLLearnyDatabase:
             "username": str(row["username"]),
             "profilePicture": row.get("profile_picture"),
             "isAdmin": bool(row.get("is_admin")) or _is_default_admin_username(str(row["username"])),
+            "attachmentsVerifiedAt": int(row.get("attachments_verified_at") or 0),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -443,6 +498,7 @@ class MySQLLearnyDatabase:
                         accounts.username,
                         accounts.profile_picture,
                         accounts.is_admin,
+                        accounts.attachments_verified_at,
                         accounts.created_at,
                         accounts.last_seen_at,
                         COALESCE(chat_counts.value, 0) AS chat_count,
@@ -688,6 +744,40 @@ class MySQLLearnyDatabase:
                     (clean_identity_key,),
                 )
                 return int(cursor.rowcount)
+
+    def locked_rate_limit_time_zone(self, lock_key: str, requested_time_zone: str | None) -> str:
+        clean_lock_key = _clean_rate_limit_identity(lock_key)
+        clean_time_zone = _clean_rate_limit_time_zone(requested_time_zone)
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT IGNORE INTO rate_limit_time_zones (lock_key, time_zone, locked_at)
+                    VALUES (%s, %s, %s)
+                    """,
+                    (clean_lock_key, clean_time_zone, _now_ms()),
+                )
+                cursor.execute(
+                    "SELECT time_zone FROM rate_limit_time_zones WHERE lock_key = %s",
+                    (clean_lock_key,),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            return clean_time_zone
+        return _clean_rate_limit_time_zone(str(row["time_zone"]))
+
+    def rate_limit_time_zone(self, lock_key: str, fallback_time_zone: str | None = None) -> str:
+        clean_lock_key = _clean_rate_limit_identity(lock_key)
+        with self._lock, self._connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT time_zone FROM rate_limit_time_zones WHERE lock_key = %s",
+                    (clean_lock_key,),
+                )
+                row = cursor.fetchone()
+        if row is None:
+            return _clean_rate_limit_time_zone(fallback_time_zone)
+        return _clean_rate_limit_time_zone(str(row["time_zone"]))
 
     def _rate_limit_snapshot(
         self,

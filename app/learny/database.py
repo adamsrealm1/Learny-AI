@@ -80,6 +80,7 @@ class LearnyDatabase:
                     password_hash TEXT NOT NULL,
                     profile_picture TEXT,
                     is_admin INTEGER NOT NULL DEFAULT 0,
+                    attachments_verified_at INTEGER NOT NULL DEFAULT 0,
                     created_at INTEGER NOT NULL,
                     last_seen_at INTEGER NOT NULL
                 );
@@ -130,6 +131,12 @@ class LearnyDatabase:
                     created_at INTEGER NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS rate_limit_time_zones (
+                    lock_key TEXT PRIMARY KEY,
+                    time_zone TEXT NOT NULL,
+                    locked_at INTEGER NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS moderation_bans (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     kind TEXT NOT NULL,
@@ -161,6 +168,7 @@ class LearnyDatabase:
             )
             self._ensure_profile_picture_column(connection)
             self._ensure_account_admin_column(connection)
+            self._ensure_attachments_verified_column(connection)
             self._ensure_message_history_column(connection)
             self._ensure_default_admin(connection)
             self._ensure_platform_settings(connection)
@@ -188,6 +196,16 @@ class LearnyDatabase:
         }
         if "is_admin" not in columns:
             connection.execute("ALTER TABLE accounts ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0")
+
+    def _ensure_attachments_verified_column(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(accounts)").fetchall()
+        }
+        if "attachments_verified_at" not in columns:
+            connection.execute(
+                "ALTER TABLE accounts ADD COLUMN attachments_verified_at INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _ensure_default_admin(self, connection: sqlite3.Connection) -> None:
         connection.execute(
@@ -245,6 +263,7 @@ class LearnyDatabase:
             "username": username,
             "profilePicture": None,
             "isAdmin": _is_default_admin_username(username),
+            "attachmentsVerifiedAt": 0,
             "createdAt": now,
             "lastSeenAt": now,
         }
@@ -278,6 +297,7 @@ class LearnyDatabase:
             "username": str(row["username"]),
             "profilePicture": row["profile_picture"],
             "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
+            "attachmentsVerifiedAt": int(row["attachments_verified_at"]),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -299,6 +319,39 @@ class LearnyDatabase:
         expected_hash = _hash_password(password, str(row["password_salt"]))
         return hmac.compare_digest(expected_hash, str(row["password_hash"]))
 
+    def attachments_verified(self, account_id: int) -> bool:
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT attachments_verified_at FROM accounts WHERE id = ?",
+                (account_id,),
+            ).fetchone()
+        if row is None:
+            return False
+        return int(row["attachments_verified_at"]) > 0
+
+    def mark_attachments_verified(self, account_id: int) -> dict[str, Any]:
+        now = _now_ms()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE accounts
+                SET attachments_verified_at = CASE
+                        WHEN attachments_verified_at > 0 THEN attachments_verified_at
+                        ELSE ?
+                    END,
+                    last_seen_at = ?
+                WHERE id = ?
+                """,
+                (now, now, account_id),
+            )
+            row = connection.execute(
+                "SELECT * FROM accounts WHERE id = ?",
+                (account_id,),
+            ).fetchone()
+        if row is None:
+            raise AccountError("Account could not be updated.")
+        return _account_from_row(row)
+
     def update_profile_picture(self, account_id: int, profile_picture: str | None) -> dict[str, Any]:
         now = _now_ms()
         with self._lock, self._connect() as connection:
@@ -318,6 +371,7 @@ class LearnyDatabase:
             "username": str(row["username"]),
             "profilePicture": row["profile_picture"],
             "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
+            "attachmentsVerifiedAt": int(row["attachments_verified_at"]),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -383,6 +437,7 @@ class LearnyDatabase:
             "username": str(row["username"]),
             "profilePicture": row["profile_picture"],
             "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
+            "attachmentsVerifiedAt": int(row["attachments_verified_at"]),
             "createdAt": int(row["created_at"]),
             "lastSeenAt": now,
         }
@@ -421,6 +476,7 @@ class LearnyDatabase:
                     accounts.username,
                     accounts.profile_picture,
                     accounts.is_admin,
+                    accounts.attachments_verified_at,
                     accounts.created_at,
                     accounts.last_seen_at,
                     COALESCE(chat_counts.value, 0) AS chat_count,
@@ -648,6 +704,36 @@ class LearnyDatabase:
                 (clean_identity_key,),
             )
             return int(cursor.rowcount if cursor.rowcount is not None else 0)
+
+    def locked_rate_limit_time_zone(self, lock_key: str, requested_time_zone: str | None) -> str:
+        clean_lock_key = _clean_rate_limit_identity(lock_key)
+        clean_time_zone = _clean_rate_limit_time_zone(requested_time_zone)
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO rate_limit_time_zones (lock_key, time_zone, locked_at)
+                VALUES (?, ?, ?)
+                """,
+                (clean_lock_key, clean_time_zone, _now_ms()),
+            )
+            row = connection.execute(
+                "SELECT time_zone FROM rate_limit_time_zones WHERE lock_key = ?",
+                (clean_lock_key,),
+            ).fetchone()
+        if row is None:
+            return clean_time_zone
+        return _clean_rate_limit_time_zone(str(row["time_zone"]))
+
+    def rate_limit_time_zone(self, lock_key: str, fallback_time_zone: str | None = None) -> str:
+        clean_lock_key = _clean_rate_limit_identity(lock_key)
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT time_zone FROM rate_limit_time_zones WHERE lock_key = ?",
+                (clean_lock_key,),
+            ).fetchone()
+        if row is None:
+            return _clean_rate_limit_time_zone(fallback_time_zone)
+        return _clean_rate_limit_time_zone(str(row["time_zone"]))
 
     def list_chats(self, account_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
@@ -891,6 +977,7 @@ def _account_from_row(row: Any) -> dict[str, Any]:
         "username": username,
         "profilePicture": profile_picture or None,
         "isAdmin": is_admin,
+        "attachmentsVerifiedAt": int(row["attachments_verified_at"]),
         "createdAt": int(row["created_at"]),
         "lastSeenAt": int(row["last_seen_at"]),
     }
