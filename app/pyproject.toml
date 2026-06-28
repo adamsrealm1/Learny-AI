@@ -5,6 +5,7 @@ description = "A Groq-powered Learny AI website."
 requires-python = ">=3.10"
 dependencies = [
     "PyMySQL>=1.1.1,<2",
+    "tzdata>=2026.2",
 ]
 
 [project.scripts]

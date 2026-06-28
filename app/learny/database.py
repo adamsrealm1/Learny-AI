@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import hashlib
 import hmac
 import secrets
 import sqlite3
+import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .conversation import ConversationHistory
 
@@ -19,9 +21,21 @@ PASSWORD_ITERATIONS = 210_000
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30
 RATE_LIMIT_LIMIT = 200
 RATE_LIMIT_WINDOW_MS = 86_400_000
-RATE_LIMIT_RESET_TIMEZONE = timezone(timedelta(hours=-4), "EDT")
+DEFAULT_RATE_LIMIT_TIME_ZONE = "UTC"
 DEFAULT_ADMIN_USERNAME = "adamsrealm1"
 PLATFORM_AVAILABLE_KEY = "learny_available"
+
+
+def _add_vendor_time_zone_path() -> None:
+    project_root = Path(__file__).resolve().parent.parent
+    for vendor_path in (Path("/vendor"), Path("/app/vendor"), project_root / "vendor"):
+        if vendor_path.is_dir():
+            vendor_text = str(vendor_path)
+            if vendor_text not in sys.path:
+                sys.path.insert(0, vendor_text)
+
+
+_add_vendor_time_zone_path()
 
 
 class AccountError(ValueError):
@@ -589,6 +603,7 @@ class LearnyDatabase:
         *,
         limit: int = RATE_LIMIT_LIMIT,
         window_ms: int = RATE_LIMIT_WINDOW_MS,
+        time_zone: str = DEFAULT_RATE_LIMIT_TIME_ZONE,
     ) -> dict[str, Any]:
         clean_identity_key = _clean_rate_limit_identity(identity_key)
         with self._lock, self._connect() as connection:
@@ -598,6 +613,7 @@ class LearnyDatabase:
                 consume=False,
                 limit=limit,
                 window_ms=window_ms,
+                time_zone=time_zone,
             )
 
     def consume_rate_limit(
@@ -606,6 +622,7 @@ class LearnyDatabase:
         *,
         limit: int = RATE_LIMIT_LIMIT,
         window_ms: int = RATE_LIMIT_WINDOW_MS,
+        time_zone: str = DEFAULT_RATE_LIMIT_TIME_ZONE,
     ) -> dict[str, Any]:
         clean_identity_key = _clean_rate_limit_identity(identity_key)
         with self._lock, self._connect() as connection:
@@ -615,6 +632,7 @@ class LearnyDatabase:
                 consume=True,
                 limit=limit,
                 window_ms=window_ms,
+                time_zone=time_zone,
             )
 
     def clear_rate_limits(self) -> int:
@@ -1101,6 +1119,19 @@ def _clean_rate_limit_identity(identity_key: str) -> str:
     return clean_value
 
 
+def _clean_rate_limit_time_zone(time_zone: str | None) -> str:
+    clean_value = str(time_zone or "").strip()
+    if not clean_value or len(clean_value) > 80:
+        return DEFAULT_RATE_LIMIT_TIME_ZONE
+    if not all(character.isalnum() or character in "/_+-" for character in clean_value):
+        return DEFAULT_RATE_LIMIT_TIME_ZONE
+    try:
+        ZoneInfo(clean_value)
+    except ZoneInfoNotFoundError:
+        return DEFAULT_RATE_LIMIT_TIME_ZONE
+    return clean_value
+
+
 def _rate_limit_payload(
     *,
     active_timestamps: list[int],
@@ -1122,8 +1153,12 @@ def _rate_limit_payload(
     }
 
 
-def _rate_limit_window(now: int) -> tuple[int, int, int]:
-    local_now = datetime.fromtimestamp(now / 1000, RATE_LIMIT_RESET_TIMEZONE)
+def _rate_limit_window(
+    now: int,
+    time_zone: str = DEFAULT_RATE_LIMIT_TIME_ZONE,
+) -> tuple[int, int, int]:
+    local_time_zone = ZoneInfo(_clean_rate_limit_time_zone(time_zone))
+    local_now = datetime.fromtimestamp(now / 1000, local_time_zone)
     window_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
     reset_at = window_start + timedelta(days=1)
     window_start_ms = int(window_start.timestamp() * 1000)
@@ -1138,12 +1173,16 @@ def _sqlite_rate_limit_snapshot(
     consume: bool,
     limit: int,
     window_ms: int,
+    time_zone: str,
 ) -> dict[str, Any]:
     now = _now_ms()
-    window_start, reset_at, actual_window_ms = _rate_limit_window(now)
+    window_start, reset_at, actual_window_ms = _rate_limit_window(now, time_zone)
     connection.execute(
-        "DELETE FROM rate_limit_events WHERE created_at < ? OR created_at >= ?",
-        (window_start, reset_at),
+        """
+        DELETE FROM rate_limit_events
+        WHERE identity_key = ? AND (created_at < ? OR created_at >= ?)
+        """,
+        (identity_key, window_start, reset_at),
     )
     rows = connection.execute(
         """

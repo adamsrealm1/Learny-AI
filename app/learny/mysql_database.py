@@ -13,6 +13,7 @@ from typing import Any
 from .conversation import ConversationHistory
 from .database import (
     DEFAULT_ADMIN_USERNAME,
+    DEFAULT_RATE_LIMIT_TIME_ZONE,
     PLATFORM_AVAILABLE_KEY,
     RATE_LIMIT_LIMIT,
     RATE_LIMIT_WINDOW_MS,
@@ -28,6 +29,7 @@ from .database import (
     _clean_identifier,
     _clean_message_payload,
     _clean_rate_limit_identity,
+    _clean_rate_limit_time_zone,
     _clean_title,
     _clean_username,
     _hash_password,
@@ -635,8 +637,10 @@ class MySQLLearnyDatabase:
         *,
         limit: int = RATE_LIMIT_LIMIT,
         window_ms: int = RATE_LIMIT_WINDOW_MS,
+        time_zone: str = DEFAULT_RATE_LIMIT_TIME_ZONE,
     ) -> dict[str, Any]:
         clean_identity_key = _clean_rate_limit_identity(identity_key)
+        clean_time_zone = _clean_rate_limit_time_zone(time_zone)
         with self._lock, self._connect() as connection:
             with connection.cursor() as cursor:
                 return self._rate_limit_snapshot(
@@ -645,6 +649,7 @@ class MySQLLearnyDatabase:
                     consume=False,
                     limit=limit,
                     window_ms=window_ms,
+                    time_zone=clean_time_zone,
                 )
 
     def consume_rate_limit(
@@ -653,8 +658,10 @@ class MySQLLearnyDatabase:
         *,
         limit: int = RATE_LIMIT_LIMIT,
         window_ms: int = RATE_LIMIT_WINDOW_MS,
+        time_zone: str = DEFAULT_RATE_LIMIT_TIME_ZONE,
     ) -> dict[str, Any]:
         clean_identity_key = _clean_rate_limit_identity(identity_key)
+        clean_time_zone = _clean_rate_limit_time_zone(time_zone)
         with self._lock, self._connect() as connection:
             with connection.cursor() as cursor:
                 return self._rate_limit_snapshot(
@@ -663,6 +670,7 @@ class MySQLLearnyDatabase:
                     consume=True,
                     limit=limit,
                     window_ms=window_ms,
+                    time_zone=clean_time_zone,
                 )
 
     def clear_rate_limits(self) -> int:
@@ -689,12 +697,16 @@ class MySQLLearnyDatabase:
         consume: bool,
         limit: int,
         window_ms: int,
+        time_zone: str,
     ) -> dict[str, Any]:
         now = _now_ms()
-        window_start, reset_at, actual_window_ms = _rate_limit_window(now)
+        window_start, reset_at, actual_window_ms = _rate_limit_window(now, time_zone)
         cursor.execute(
-            "DELETE FROM rate_limit_events WHERE created_at < %s OR created_at >= %s",
-            (window_start, reset_at),
+            """
+            DELETE FROM rate_limit_events
+            WHERE identity_key = %s AND (created_at < %s OR created_at >= %s)
+            """,
+            (identity_key, window_start, reset_at),
         )
         cursor.execute(
             """

@@ -166,6 +166,15 @@ function appAssetPath(path) {
   return new URL(path.replace(/^\/+/, ""), APP_ASSET_BASE_URL).toString();
 }
 
+function clientTimeZone() {
+  try {
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof timeZone === "string" ? timeZone : "";
+  } catch {
+    return "";
+  }
+}
+
 function attachmentExtensionFromName(name) {
   const cleanName = String(name || "").trim();
   const dotIndex = cleanName.lastIndexOf(".");
@@ -3124,6 +3133,10 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       }
       if (rateLimitSessionId && !("X-Learny-Rate-Session" in requestHeaders)) {
         requestHeaders["X-Learny-Rate-Session"] = rateLimitSessionId;
+      }
+      const timeZone = clientTimeZone();
+      if (timeZone && !("X-Learny-Time-Zone" in requestHeaders)) {
+        requestHeaders["X-Learny-Time-Zone"] = timeZone;
       }
 
       const response = await fetch(apiUrl(apiBase, path), {

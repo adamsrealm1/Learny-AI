@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -73,9 +74,25 @@ class WasmerStorageTests(unittest.TestCase):
         self.assertIsInstance(database, LearnyDatabase)
         self.assertEqual(database.backend_name, "sqlite")
 
-    def test_rate_limit_global_reset_keeps_only_current_window_events(self) -> None:
+    def test_rate_limit_window_uses_requested_local_midnight(self) -> None:
+        now = int(datetime(2026, 6, 28, 10, 0, tzinfo=timezone.utc).timestamp() * 1000)
+        _window_start, reset_at, window_ms = _rate_limit_window(now, "Australia/Sydney")
+        expected_reset_at = int(datetime(2026, 6, 28, 14, 0, tzinfo=timezone.utc).timestamp() * 1000)
+
+        self.assertEqual(reset_at, expected_reset_at)
+        self.assertEqual(window_ms, 86_400_000)
+
+    def test_rate_limit_window_handles_daylight_saving_midnight(self) -> None:
+        now = int(datetime(2026, 3, 8, 12, 0, tzinfo=timezone.utc).timestamp() * 1000)
+        _window_start, reset_at, window_ms = _rate_limit_window(now, "America/New_York")
+        expected_reset_at = int(datetime(2026, 3, 9, 4, 0, tzinfo=timezone.utc).timestamp() * 1000)
+
+        self.assertEqual(reset_at, expected_reset_at)
+        self.assertEqual(window_ms, 82_800_000)
+
+    def test_rate_limit_local_reset_keeps_only_current_identity_window_events(self) -> None:
         now = 1_781_625_600_000
-        window_start, reset_at, _window_ms = _rate_limit_window(now)
+        window_start, reset_at, _window_ms = _rate_limit_window(now, "Australia/Sydney")
 
         with TemporaryDirectory() as temp_dir:
             database = LearnyDatabase(Path(temp_dir) / "learny.sqlite3")
@@ -83,27 +100,43 @@ class WasmerStorageTests(unittest.TestCase):
                 connection.executemany(
                     "INSERT INTO rate_limit_events (identity_key, created_at) VALUES (?, ?)",
                     [
-                        ("global:signed-in", window_start - 10_000),
-                        ("global:signed-in", reset_at + 10_000),
-                        ("global:signed-in", window_start + 10_000),
-                        ("global:guest", window_start - 5_000),
+                        ("account:1", window_start - 10_000),
+                        ("account:1", reset_at + 10_000),
+                        ("account:1", window_start + 10_000),
+                        ("session:guest", window_start - 5_000),
+                        ("account:2", window_start - 10_000),
                     ],
                 )
 
             with patch("learny.database._now_ms", return_value=now):
-                signed_in_limit = database.peek_rate_limit("global:signed-in", limit=200)
-                guest_limit = database.peek_rate_limit("global:guest", limit=30)
+                signed_in_limit = database.peek_rate_limit(
+                    "account:1",
+                    limit=200,
+                    time_zone="Australia/Sydney",
+                )
+                guest_limit = database.peek_rate_limit(
+                    "session:guest",
+                    limit=30,
+                    time_zone="Australia/Sydney",
+                )
 
             with database._connect() as connection:
                 rows = connection.execute(
-                    "SELECT identity_key, created_at FROM rate_limit_events ORDER BY created_at"
+                    """
+                    SELECT identity_key, created_at
+                    FROM rate_limit_events
+                    ORDER BY identity_key, created_at
+                    """
                 ).fetchall()
 
         self.assertEqual(signed_in_limit["remaining"], 199)
         self.assertEqual(guest_limit["remaining"], 30)
         self.assertEqual(
             [(row["identity_key"], row["created_at"]) for row in rows],
-            [("global:signed-in", window_start + 10_000)],
+            [
+                ("account:1", window_start + 10_000),
+                ("account:2", window_start - 10_000),
+            ],
         )
 
 

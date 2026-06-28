@@ -37,6 +37,7 @@ from .groq_client import (
 )
 from .database import (
     DEFAULT_ADMIN_USERNAME,
+    DEFAULT_RATE_LIMIT_TIME_ZONE,
     AccountError,
     AuthenticationError,
     RATE_LIMIT_LIMIT,
@@ -93,8 +94,6 @@ SUPPORTED_ATTACHMENT_EXTENSIONS = {
 }
 PLAIN_TEXT_ATTACHMENT_EXTENSIONS = {"txt", "md", "log", "csv", "json", "xml"}
 GUEST_RATE_LIMIT_LIMIT = 30
-GLOBAL_SIGNED_IN_RATE_LIMIT_IDENTITY = "global:signed-in-ask"
-GLOBAL_GUEST_RATE_LIMIT_IDENTITY = "global:guest-ask"
 
 
 @dataclass(frozen=True)
@@ -314,7 +313,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
                 self.send_header(
                     "Access-Control-Allow-Headers",
-                    "Content-Type, X-Learny-Session, X-Learny-Rate-Session",
+                    "Content-Type, X-Learny-Session, X-Learny-Rate-Session, X-Learny-Time-Zone",
                 )
                 self.send_header("Access-Control-Max-Age", "86400")
                 self.end_headers()
@@ -391,7 +390,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             admin = self._require_admin_account()
             if admin is None:
                 return
-            self._send_json(_admin_portal_payload(database))
+            self._send_json(
+                _admin_portal_payload(
+                    database,
+                    _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                )
+            )
 
         def _handle_create_account(self) -> None:
             try:
@@ -544,11 +548,13 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
             deleted = database.clear_rate_limits()
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            rate_limit_identity, rate_limit_size = _rate_limit_policy(account)
+            time_zone = _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
+            rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
                 limit=rate_limit_size,
                 window_ms=RATE_LIMIT_WINDOW_MS,
+                time_zone=time_zone,
             )
             self._send_json(
                 {
@@ -566,11 +572,13 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self._send_ban_response(ban)
                 return
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            rate_limit_identity, rate_limit_size = _rate_limit_policy(account)
+            time_zone = _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
+            rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
                 limit=rate_limit_size,
                 window_ms=RATE_LIMIT_WINDOW_MS,
+                time_zone=time_zone,
             )
             self._send_json(
                 {
@@ -590,7 +598,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             except (ValueError, AccountError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
-            self._send_json(_admin_portal_payload(database))
+            self._send_json(
+                _admin_portal_payload(
+                    database,
+                    _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                )
+            )
 
         def _handle_admin_reset_rate_limit(self) -> None:
             admin = self._require_admin_account()
@@ -602,19 +615,21 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 target_account = _account_by_username(database, username)
                 if target_account is None:
                     raise AccountError("Account could not be found.")
+                time_zone = _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
                 rate_limit_identity, rate_limit_size = _rate_limit_policy(target_account)
                 deleted = database.clear_rate_limit(rate_limit_identity)
                 rate_limit = database.peek_rate_limit(
                     rate_limit_identity,
                     limit=rate_limit_size,
                     window_ms=RATE_LIMIT_WINDOW_MS,
+                    time_zone=time_zone,
                 )
             except (ValueError, AccountError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
             self._send_json(
                 {
-                    **_admin_portal_payload(database),
+                    **_admin_portal_payload(database, time_zone),
                     "deleted": deleted,
                     "rateLimit": _public_rate_limit(rate_limit),
                     "resetRateLimit": _public_rate_limit(rate_limit),
@@ -636,7 +651,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             except (ValueError, AccountError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
-            self._send_json(_admin_portal_payload(database))
+            self._send_json(
+                _admin_portal_payload(
+                    database,
+                    _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                )
+            )
 
         def _handle_admin_unban(self) -> None:
             admin = self._require_admin_account()
@@ -651,7 +671,12 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             except (ValueError, AccountError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
-            self._send_json(_admin_portal_payload(database))
+            self._send_json(
+                _admin_portal_payload(
+                    database,
+                    _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                )
+            )
 
         def _handle_admin_delete_account(self) -> None:
             admin = self._require_admin_account()
@@ -663,7 +688,15 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             except (ValueError, AccountError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
-            self._send_json({**_admin_portal_payload(database), "deleted": deleted})
+            self._send_json(
+                {
+                    **_admin_portal_payload(
+                        database,
+                        _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                    ),
+                    "deleted": deleted,
+                }
+            )
 
         def _handle_admin_role(self) -> None:
             admin = self._require_admin_account()
@@ -681,7 +714,15 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             except (ValueError, AccountError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
                 return
-            self._send_json({**_admin_portal_payload(database), "updatedAccount": _public_account(updated)})
+            self._send_json(
+                {
+                    **_admin_portal_payload(
+                        database,
+                        _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
+                    ),
+                    "updatedAccount": _public_account(updated),
+                }
+            )
 
         def _handle_get_chats(self) -> None:
             account = self._current_account()
@@ -766,11 +807,13 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             )
             session_id, session_history = session_store.get(requested_session_id)
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            rate_limit_identity, rate_limit_size = _rate_limit_policy(account)
+            time_zone = _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
+            rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
                 limit=rate_limit_size,
                 window_ms=RATE_LIMIT_WINDOW_MS,
+                time_zone=time_zone,
             )
             if not rate_limit.get("allowed", False):
                 self._send_json(
@@ -816,6 +859,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 rate_limit_identity,
                 limit=rate_limit_size,
                 window_ms=RATE_LIMIT_WINDOW_MS,
+                time_zone=time_zone,
             )
             if not rate_limit.get("allowed", False):
                 self._send_json(
@@ -1572,10 +1616,15 @@ def _rate_session_id(value: str | None) -> str:
     return _clean_session_id(value) or secrets.token_urlsafe(18)
 
 
-def _rate_limit_policy(account: dict[str, Any] | None) -> tuple[str, int]:
+def _request_time_zone(value: str | None) -> str:
+    time_zone = str(value or "").strip()
+    return time_zone[:80] if time_zone else DEFAULT_RATE_LIMIT_TIME_ZONE
+
+
+def _rate_limit_policy(account: dict[str, Any] | None, rate_session_id: str = "") -> tuple[str, int]:
     if account is None:
-        return GLOBAL_GUEST_RATE_LIMIT_IDENTITY, GUEST_RATE_LIMIT_LIMIT
-    return GLOBAL_SIGNED_IN_RATE_LIMIT_IDENTITY, RATE_LIMIT_LIMIT
+        return f"session:{_rate_session_id(rate_session_id)}", GUEST_RATE_LIMIT_LIMIT
+    return f"account:{int(account['id'])}", RATE_LIMIT_LIMIT
 
 
 def _is_admin_account(account: dict[str, Any] | None) -> bool:
@@ -1665,7 +1714,10 @@ def _public_admin_account(
     }
 
 
-def _admin_portal_payload(database: Any) -> dict[str, Any]:
+def _admin_portal_payload(
+    database: Any,
+    time_zone: str = DEFAULT_RATE_LIMIT_TIME_ZONE,
+) -> dict[str, Any]:
     raw_accounts = database.list_accounts()
     account_lookup = {
         str(account.get("username", "")).casefold(): account
@@ -1680,6 +1732,7 @@ def _admin_portal_payload(database: Any) -> dict[str, Any]:
                 identity_key,
                 limit=limit,
                 window_ms=RATE_LIMIT_WINDOW_MS,
+                time_zone=time_zone,
             )
     accounts = [
         _public_admin_account(

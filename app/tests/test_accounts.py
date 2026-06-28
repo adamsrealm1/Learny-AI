@@ -6,10 +6,12 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from learny.conversation import ConversationHistory
 from learny.groq_client import GeneratedAnswer, PRIMARY_GROQ_MODEL
@@ -363,7 +365,7 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(CountingAnswerGenerator.calls, 200)
         self.assertEqual(len(chats["chats"][0]["messages"]), 400)
 
-    def test_signed_out_global_rate_limit_blocks_31st_guest_ask(self) -> None:
+    def test_signed_out_rate_limit_blocks_31st_guest_ask_for_same_browser(self) -> None:
         CountingAnswerGenerator.calls = 0
         with run_account_server(CountingAnswerGenerator) as server:
             status = server.get_json("/api/rate-limit")
@@ -412,70 +414,109 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(blocked["status"], 429)
         self.assertTrue(blocked["data"]["rateLimit"]["limited"])
 
-    def test_signed_out_global_rate_limit_cannot_be_bypassed_by_rate_session(self) -> None:
+    def test_signed_out_rate_limit_is_separate_per_browser_session(self) -> None:
         with run_account_server() as server:
+            first_headers = {"X-Learny-Rate-Session": "first-browser"}
             for index in range(30):
                 server.post_json(
                     "/api/ask",
-                    {"message": f"global guest {index}", "sessionId": "global-guest-session"},
-                    {"X-Learny-Rate-Session": f"browser-{index}"},
+                    {"message": f"first guest {index}", "sessionId": "first-guest-session"},
+                    first_headers,
                 )
 
             blocked = server.post_json_status(
                 "/api/ask",
-                {"message": "try a fresh browser bypass", "sessionId": "global-guest-session"},
-                {"X-Learny-Rate-Session": "fresh-browser-after-limit"},
+                {"message": "same browser blocked", "sessionId": "first-guest-session"},
+                first_headers,
             )
-            status = server.get_json("/api/rate-limit")
+            fresh_browser = server.post_json(
+                "/api/ask",
+                {"message": "fresh browser allowed", "sessionId": "second-guest-session"},
+                {"X-Learny-Rate-Session": "second-browser"},
+            )
 
         self.assertEqual(blocked["status"], 429)
         self.assertTrue(blocked["data"]["rateLimit"]["limited"])
-        self.assertTrue(status["rateLimit"]["limited"])
+        self.assertEqual(fresh_browser["rateLimit"]["remaining"], 29)
 
-    def test_signed_in_global_limit_uses_200_message_bucket(self) -> None:
+    def test_signed_in_limit_uses_200_message_bucket_per_account(self) -> None:
         with run_account_server() as server:
             server.post_json(
                 "/api/accounts/create",
                 {"username": "signed_in_limit", "password": "strong-password"},
             )
+            for index in range(3):
+                server.post_json(
+                    "/api/ask",
+                    {"message": f"account one {index}", "chatId": "signed-in-limit-one"},
+                )
             status = server.get_json("/api/rate-limit")
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "signed_in_limit_two", "password": "strong-password"},
+            )
+            second_status = server.get_json("/api/rate-limit")
 
         self.assertEqual(status["rateLimit"]["limit"], 200)
-        self.assertEqual(status["rateLimit"]["remaining"], 200)
+        self.assertEqual(status["rateLimit"]["remaining"], 197)
+        self.assertEqual(second_status["rateLimit"]["limit"], 200)
+        self.assertEqual(second_status["rateLimit"]["remaining"], 200)
 
-    def test_rate_limit_reset_time_is_global_midnight_edt(self) -> None:
+    def test_rate_limit_reset_time_uses_browser_local_midnight(self) -> None:
+        sydney_headers = {"X-Learny-Time-Zone": "Australia/Sydney"}
+        los_angeles_headers = {"X-Learny-Time-Zone": "America/Los_Angeles"}
         with run_account_server() as server:
-            guest_status = server.get_json("/api/rate-limit")["rateLimit"]
+            guest_status = server.get_json("/api/rate-limit", sydney_headers)["rateLimit"]
             guest_answer = server.post_json(
                 "/api/ask",
                 {"message": "guest reset check", "sessionId": "guest-reset-check"},
+                sydney_headers,
             )["rateLimit"]
+            los_angeles_status = server.get_json("/api/rate-limit", los_angeles_headers)["rateLimit"]
             server.post_json(
                 "/api/accounts/create",
                 {"username": "reset_time_user_one", "password": "strong-password"},
             )
-            first_account_status = server.get_json("/api/rate-limit")["rateLimit"]
+            first_account_status = server.get_json("/api/rate-limit", sydney_headers)["rateLimit"]
             first_account_answer = server.post_json(
                 "/api/ask",
                 {"message": "account reset check", "chatId": "reset-time-chat"},
+                sydney_headers,
             )["rateLimit"]
             server.post_json("/api/accounts/sign-out", {})
             server.post_json(
                 "/api/accounts/create",
                 {"username": "reset_time_user_two", "password": "strong-password"},
             )
-            second_account_status = server.get_json("/api/rate-limit")["rateLimit"]
+            second_account_status = server.get_json("/api/rate-limit", sydney_headers)["rateLimit"]
 
-        reset_times = {
+        sydney_reset_times = {
             guest_status["resetAt"],
             guest_answer["resetAt"],
             first_account_status["resetAt"],
             first_account_answer["resetAt"],
             second_account_status["resetAt"],
         }
-        self.assertEqual(len(reset_times), 1)
+        self.assertEqual(len(sydney_reset_times), 1)
+        self.assertNotEqual(guest_status["resetAt"], los_angeles_status["resetAt"])
         self.assertEqual(guest_status["windowMs"], 86_400_000)
-        self.assertEqual(guest_status["resetAt"] % 86_400_000, 4 * 60 * 60 * 1000)
+        sydney_reset = datetime.fromtimestamp(
+            guest_status["resetAt"] / 1000,
+            timezone.utc,
+        ).astimezone(ZoneInfo("Australia/Sydney"))
+        los_angeles_reset = datetime.fromtimestamp(
+            los_angeles_status["resetAt"] / 1000,
+            timezone.utc,
+        ).astimezone(ZoneInfo("America/Los_Angeles"))
+        self.assertEqual(
+            (sydney_reset.hour, sydney_reset.minute, sydney_reset.second),
+            (0, 0, 0),
+        )
+        self.assertEqual(
+            (los_angeles_reset.hour, los_angeles_reset.minute, los_angeles_reset.second),
+            (0, 0, 0),
+        )
 
     def test_adamsrealm1_can_reset_everyones_rate_limits(self) -> None:
         with run_account_server() as server:
@@ -520,13 +561,29 @@ class AccountWebTests(unittest.TestCase):
                     "/api/ask",
                     {"message": f"portal rate setup {index}", "chatId": "portal-rate-chat"},
                 )
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "portal_fresh_user", "password": "strong-password"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/sign-in",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
             portal = server.get_json("/api/admin/portal")["adminPortal"]
 
         self.assertFalse(portal["platform"]["available"] is False)
-        self.assertEqual([account["username"] for account in portal["accounts"]], ["adamsrealm1"])
+        self.assertEqual(
+            {account["username"] for account in portal["accounts"]},
+            {"adamsrealm1", "portal_fresh_user"},
+        )
         self.assertEqual([account["username"] for account in portal["admins"]], ["adamsrealm1"])
-        self.assertEqual(portal["accounts"][0]["rateLimit"]["remaining"], 198)
-        self.assertEqual(portal["accounts"][0]["rateLimitPercent"], 99)
+        accounts_by_name = {account["username"]: account for account in portal["accounts"]}
+        self.assertEqual(accounts_by_name["adamsrealm1"]["rateLimit"]["remaining"], 198)
+        self.assertEqual(accounts_by_name["adamsrealm1"]["rateLimitPercent"], 99)
+        self.assertEqual(accounts_by_name["portal_fresh_user"]["rateLimit"]["remaining"], 200)
+        self.assertEqual(accounts_by_name["portal_fresh_user"]["rateLimitPercent"], 100)
 
     def test_admin_can_reset_rate_limit_for_username_from_admin_portal(self) -> None:
         with run_account_server() as server:
@@ -966,13 +1023,23 @@ class run_account_server:
             self.thread.join(timeout=5)
         self.temp_dir.cleanup()
 
-    def get_json(self, path: str) -> dict[str, Any]:
-        with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:
+    def get_json(self, path: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            headers=headers or {},
+            method="GET",
+        )
+        with self.opener.open(request, timeout=10) as response:
             return json.loads(response.read().decode("utf-8"))
 
-    def get_json_status(self, path: str) -> dict[str, Any]:
+    def get_json_status(self, path: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            headers=headers or {},
+            method="GET",
+        )
         try:
-            with self.opener.open(f"{self.base_url}{path}", timeout=10) as response:
+            with self.opener.open(request, timeout=10) as response:
                 return {
                     "status": int(response.status),
                     "data": json.loads(response.read().decode("utf-8")),
