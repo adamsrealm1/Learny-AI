@@ -339,7 +339,8 @@ input:focus-visible {
   display: grid;
   gap: 2px;
   min-width: 0;
-  text-align: left;
+  place-items: center;
+  text-align: center;
 }
 
 .admin-nav-button strong {
