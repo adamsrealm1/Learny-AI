@@ -1006,25 +1006,51 @@ def _messages_with_preserved_history_text(
     existing_rows: list[Any],
 ) -> list[dict[str, Any]]:
     preserved: list[dict[str, Any]] = []
-    for index, message in enumerate(messages):
+    used_existing_indices: set[int] = set()
+    for message in messages:
         next_message = dict(message)
-        existing_history_text = ""
-        if index < len(existing_rows):
-            row = existing_rows[index]
+        fallback = str(next_message["text"])
+        history_text = _clean_history_text(next_message.get("historyText"), fallback=fallback)
+        incoming_score = _history_text_score(history_text, fallback)
+        best_existing_index: int | None = None
+        best_existing_text = ""
+        best_existing_score = -1
+
+        for index, row in enumerate(existing_rows):
+            if index in used_existing_indices:
+                continue
             if (
-                _row_string(row, "speaker") == str(message["speaker"])
-                and _row_string(row, "text") == str(message["text"])
+                _row_string(row, "speaker") != str(next_message["speaker"])
+                or _row_string(row, "text") != str(next_message["text"])
             ):
-                existing_history_text = _row_string(row, "history_text").strip()
-        if existing_history_text:
-            next_message["historyText"] = existing_history_text
-        else:
-            next_message["historyText"] = _clean_history_text(
-                next_message.get("historyText"),
-                fallback=str(next_message["text"]),
-            )
+                continue
+            candidate_text = _clean_history_text(_row_string(row, "history_text"), fallback=fallback)
+            candidate_score = _history_text_score(candidate_text, fallback)
+            if candidate_score > best_existing_score:
+                best_existing_index = index
+                best_existing_text = candidate_text
+                best_existing_score = candidate_score
+
+        if best_existing_index is not None:
+            used_existing_indices.add(best_existing_index)
+        if best_existing_score > incoming_score:
+            history_text = best_existing_text
+        next_message["historyText"] = history_text
         preserved.append(next_message)
     return preserved
+
+
+def _history_text_score(history_text: str, fallback: str) -> int:
+    clean_history_text = str(history_text).strip()
+    clean_fallback = str(fallback).strip()
+    if not clean_history_text:
+        return 0
+    score = min(len(clean_history_text), 40_000)
+    if clean_history_text != clean_fallback:
+        score += 100_000
+    if "Attachment instructions:" in clean_history_text:
+        score += 100_000
+    return score
 
 
 def _row_string(row: Any, key: str) -> str:

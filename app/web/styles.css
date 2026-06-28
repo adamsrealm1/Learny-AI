@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #000;
-  --sidebar: rgba(8, 8, 12, 0.38);
+  --sidebar: rgba(2, 5, 15, 0.24);
   --sidebar-border: rgba(255, 255, 255, 0.12);
   --hover: rgba(255, 255, 255, 0.1);
   --active: rgba(255, 255, 255, 0.16);
@@ -140,14 +140,15 @@ input:focus-visible {
   padding: 12px var(--sidebar-gutter);
   border-right: 1px solid var(--sidebar-border);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.025)),
+    linear-gradient(180deg, rgba(4, 12, 36, 0.42), rgba(0, 0, 0, 0.2)),
+    linear-gradient(115deg, rgba(10, 24, 64, 0.24), rgba(0, 0, 0, 0.12) 56%, rgba(0, 0, 0, 0.28)),
     var(--sidebar);
   box-shadow:
-    inset -1px 0 rgba(255, 255, 255, 0.07),
-    inset 0 1px rgba(255, 255, 255, 0.08),
+    inset -1px 0 rgb(24, 24, 24),
+    inset 0 1px rgba(155, 155, 155, 0.08),
     18px 0 60px rgba(0, 0, 0, 0.38);
   overflow: hidden;
-  backdrop-filter: blur(18px) saturate(1.45);
+  backdrop-filter: blur(5px) saturate(1.45);
   -webkit-backdrop-filter: blur(18px) saturate(1.45);
 }
 
@@ -157,11 +158,11 @@ input:focus-visible {
   inset: -40% -26%;
   z-index: 0;
   background:
-    radial-gradient(circle at 18% 16%, rgba(255, 255, 255, 0.12), transparent 0 18%, transparent 36%),
-    radial-gradient(circle at 82% 72%, rgba(255, 255, 255, 0.055), transparent 0 38%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.085), transparent 45%, rgba(255, 255, 255, 0.035));
+    radial-gradient(circle at 18% 16%, rgba(10, 28, 80, 0.22), transparent 0 22%, transparent 38%),
+    radial-gradient(circle at 82% 72%, rgba(1, 8, 24, 0.3), transparent 0 42%),
+    linear-gradient(145deg, rgba(3, 13, 38, 0.22), transparent 48%, rgba(0, 0, 0, 0.36));
   filter: blur(22px);
-  opacity: 0.64;
+  opacity: 0.46;
   pointer-events: none;
   transform: translate3d(0, 0, 0);
   animation: sidebarAura 13s ease-in-out infinite alternate;
@@ -1275,10 +1276,12 @@ body.account-modal-open {
   color: #fff;
   background: rgba(255, 255, 255, 0.12);
   transform: scale(1.06);
+  cursor:col-resize
 }
 
 .sidebar-toggle:hover .collapse-icon {
   opacity: 1;
+  cursor:col-resize
 }
 
 .chats-panel {

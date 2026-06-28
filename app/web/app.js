@@ -336,8 +336,8 @@ function createStarField() {
   for (let index = 0; index < starCount; index += 1) {
     const star = document.createElement("span");
     const angle = Math.random() * Math.PI * 2;
-    const travel = 8 + Math.random() * 22;
-    const duration = 260 + Math.random() * 460;
+    const travel = 14 + Math.random() * 26;
+    const duration = 115 + Math.random() * 165;
     const smallStar = Math.random() < 0.88;
     const size = smallStar ? 0.7 + Math.random() * 0.75 : 1.45 + Math.random() * 0.85;
     const opacity = 0.24 + Math.random() * 0.56;

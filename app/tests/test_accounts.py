@@ -57,6 +57,27 @@ class CapturingHistoryAnswerGenerator:
         )
 
 
+class BlockingCapturingHistoryAnswerGenerator(CapturingHistoryAnswerGenerator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_call_started = threading.Event()
+        self.release_first_call = threading.Event()
+
+    def generate(
+        self,
+        question: str,
+        history: ConversationHistory,
+    ) -> GeneratedAnswer:
+        self.calls.append({"question": question, "history": history.recent()})
+        if len(self.calls) == 1:
+            self.first_call_started.set()
+            self.release_first_call.wait(timeout=5)
+        return GeneratedAnswer(
+            answer=f"Captured answer {len(self.calls)}.",
+            model=PRIMARY_GROQ_MODEL,
+        )
+
+
 class NoAnswerGenerator:
     def generate(
         self,
@@ -218,6 +239,95 @@ class AccountWebTests(unittest.TestCase):
         self.assertIn("Name: NE.md", history[0].user)
         self.assertIn("Exact hidden file line.", history[0].user)
         self.assertNotIn("Exact hidden file line.", json.dumps(visible_chats))
+
+    def test_attachment_history_survives_browser_sync_during_slow_answer(self) -> None:
+        generator = BlockingCapturingHistoryAnswerGenerator()
+        ask_result: dict[str, Any] = {}
+        ask_error: list[BaseException] = []
+        with run_account_server(lambda: generator) as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "slow_file_user", "password": "strong-password"},
+            )
+            verification = server.post_json(
+                "/api/attachments/verify",
+                {"password": "strong-password"},
+            )
+
+            def run_first_ask() -> None:
+                try:
+                    ask_result["data"] = server.post_multipart(
+                        "/api/ask",
+                        fields={
+                            "message": "What does this file say?",
+                            "chatId": "file-chat",
+                            "sessionId": "file-session",
+                            "attachmentVerificationToken": verification["attachmentVerification"]["token"],
+                        },
+                        filename="NE.md",
+                        content_type="text/markdown",
+                        content=b"# NOODLE EXTENSIONS\nDo not lose this file text.",
+                    )
+                except BaseException as error:  # pragma: no cover - re-raised below
+                    ask_error.append(error)
+
+            ask_thread = threading.Thread(target=run_first_ask)
+            ask_thread.start()
+            self.assertTrue(generator.first_call_started.wait(timeout=5))
+
+            browser_chat_before_answer = {
+                "id": "file-chat",
+                "title": "What does this file say?",
+                "sessionId": "file-session",
+                "createdAt": 1,
+                "updatedAt": 2,
+                "messages": [
+                    {
+                        "speaker": "You",
+                        "text": "What does this file say?",
+                        "source": "sent",
+                        "createdAt": 3,
+                    }
+                ],
+            }
+            server.post_json("/api/chats/sync", {"chats": [browser_chat_before_answer]})
+            generator.release_first_call.set()
+            ask_thread.join(timeout=5)
+            self.assertFalse(ask_thread.is_alive())
+            if ask_error:
+                raise ask_error[0]
+            self.assertEqual(ask_result["data"]["answer"], "Captured answer 1.")
+
+            browser_chat_after_answer = {
+                **browser_chat_before_answer,
+                "updatedAt": 4,
+                "messages": [
+                    browser_chat_before_answer["messages"][0],
+                    {
+                        "speaker": "Learny",
+                        "text": "Captured answer 1.",
+                        "source": "groq",
+                        "createdAt": 5,
+                    },
+                ],
+            }
+            server.post_json("/api/chats/sync", {"chats": [browser_chat_after_answer]})
+            second = server.post_json(
+                "/api/ask",
+                {
+                    "message": "read to me the exact thing that the file says",
+                    "chatId": "file-chat",
+                    "sessionId": "file-session",
+                },
+            )
+
+        self.assertEqual(second["answer"], "Captured answer 2.")
+        self.assertEqual(len(generator.calls), 2)
+        history = generator.calls[1]["history"]
+        self.assertEqual(len(history), 1)
+        self.assertIn("Attachment instructions:", history[0].user)
+        self.assertIn("Name: NE.md", history[0].user)
+        self.assertIn("Do not lose this file text.", history[0].user)
 
     def test_rate_limit_blocks_201st_signed_in_ask_without_persisting(self) -> None:
         CountingAnswerGenerator.calls = 0
