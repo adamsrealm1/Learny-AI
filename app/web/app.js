@@ -151,6 +151,7 @@ const WASMER_API_FALLBACK_BASE = "https://learny-ai.wasmer.app";
 const API_BASE_CANDIDATES = buildApiBaseCandidates();
 const DESKTOP_STAR_COUNT = 360;
 const MOBILE_STAR_COUNT = 230;
+const DESKTOP_SIDEBAR_STAR_COUNT = 230;
 const PROMPT_META_MARKERS = [
   "current user question",
   "previous conversation",
@@ -330,21 +331,26 @@ function createStarField() {
   }
 
   const starCount = window.innerWidth < 700 ? MOBILE_STAR_COUNT : DESKTOP_STAR_COUNT;
+  const sidebarStarCount = window.innerWidth <= 860 ? 0 : DESKTOP_SIDEBAR_STAR_COUNT;
+  const rootStyles = getComputedStyle(document.documentElement);
+  const cssSidebarWidth = Number.parseFloat(rootStyles.getPropertyValue("--sidebar-width"));
+  const sidebarWidth = Number.isFinite(cssSidebarWidth) && cssSidebarWidth > 0 ? cssSidebarWidth : 292;
   const fragment = document.createDocumentFragment();
   starField.replaceChildren();
 
-  for (let index = 0; index < starCount; index += 1) {
+  function makeStar(sidebarOnly = false) {
     const star = document.createElement("span");
     const angle = Math.random() * Math.PI * 2;
     const travel = 14 + Math.random() * 26;
     const duration = 115 + Math.random() * 165;
     const smallStar = Math.random() < 0.88;
     const size = smallStar ? 0.7 + Math.random() * 0.75 : 1.45 + Math.random() * 0.85;
-    const opacity = 0.24 + Math.random() * 0.56;
+    const opacity = sidebarOnly ? 0.34 + Math.random() * 0.52 : 0.24 + Math.random() * 0.56;
     const glow = smallStar ? 2 + Math.random() * 4 : 4 + Math.random() * 7;
+    const x = sidebarOnly ? `${4 + Math.random() * Math.max(sidebarWidth - 8, 1)}px` : `${Math.random() * 100}vw`;
 
     star.className = "star";
-    star.style.setProperty("--x", `${Math.random() * 100}vw`);
+    star.style.setProperty("--x", x);
     star.style.setProperty("--y", `${Math.random() * 100}vh`);
     star.style.setProperty("--travel-x", `${Math.cos(angle) * travel}vw`);
     star.style.setProperty("--travel-y", `${Math.sin(angle) * travel}vh`);
@@ -354,7 +360,15 @@ function createStarField() {
     star.style.setProperty("--glow-opacity", (opacity * 0.42).toFixed(2));
     star.style.setProperty("--duration", `${duration.toFixed(1)}s`);
     star.style.setProperty("--delay", `${(-Math.random() * duration).toFixed(1)}s`);
-    fragment.append(star);
+    return star;
+  }
+
+  for (let index = 0; index < starCount; index += 1) {
+    fragment.append(makeStar());
+  }
+
+  for (let index = 0; index < sidebarStarCount; index += 1) {
+    fragment.append(makeStar(true));
   }
 
   starField.append(fragment);

@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
   --bg: #000;
-  --sidebar: rgba(2, 5, 15, 0.24);
+  --sidebar: rgba(1, 4, 15, 0.035);
   --sidebar-border: rgba(255, 255, 255, 0.12);
   --hover: rgba(255, 255, 255, 0.1);
   --active: rgba(255, 255, 255, 0.16);
@@ -19,7 +19,7 @@
   --accent-2: #6e75ff;
   --accent-3: #3d8bff;
   --radius: 8px;
-  --sidebar-width: 268px;
+  --sidebar-width: 292px;
   --sidebar-gutter: 14px;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -140,16 +140,16 @@ input:focus-visible {
   padding: 12px var(--sidebar-gutter);
   border-right: 1px solid var(--sidebar-border);
   background:
-    linear-gradient(180deg, rgba(4, 12, 36, 0.42), rgba(0, 0, 0, 0.2)),
-    linear-gradient(115deg, rgba(10, 24, 64, 0.24), rgba(0, 0, 0, 0.12) 56%, rgba(0, 0, 0, 0.28)),
+    linear-gradient(180deg, rgba(3, 10, 31, 0.1), rgba(0, 0, 0, 0.04)),
+    linear-gradient(115deg, rgba(6, 18, 52, 0.05), rgba(0, 0, 0, 0.02) 56%, rgba(0, 0, 0, 0.07)),
     var(--sidebar);
   box-shadow:
     inset -1px 0 rgb(24, 24, 24),
     inset 0 1px rgba(155, 155, 155, 0.08),
     18px 0 60px rgba(0, 0, 0, 0.38);
   overflow: hidden;
-  backdrop-filter: blur(5px) saturate(1.45);
-  -webkit-backdrop-filter: blur(18px) saturate(1.45);
+  backdrop-filter: blur(2px) saturate(1.08);
+  -webkit-backdrop-filter: blur(2px) saturate(1.08);
 }
 
 .sidebar::before {
@@ -158,11 +158,11 @@ input:focus-visible {
   inset: -40% -26%;
   z-index: 0;
   background:
-    radial-gradient(circle at 18% 16%, rgba(10, 28, 80, 0.22), transparent 0 22%, transparent 38%),
-    radial-gradient(circle at 82% 72%, rgba(1, 8, 24, 0.3), transparent 0 42%),
-    linear-gradient(145deg, rgba(3, 13, 38, 0.22), transparent 48%, rgba(0, 0, 0, 0.36));
-  filter: blur(22px);
-  opacity: 0.46;
+    radial-gradient(circle at 18% 16%, rgba(8, 24, 72, 0.06), transparent 0 22%, transparent 38%),
+    radial-gradient(circle at 82% 72%, rgba(1, 7, 22, 0.1), transparent 0 42%),
+    linear-gradient(145deg, rgba(2, 11, 34, 0.07), transparent 48%, rgba(0, 0, 0, 0.14));
+  filter: none;
+  opacity: 0.16;
   pointer-events: none;
   transform: translate3d(0, 0, 0);
   animation: sidebarAura 13s ease-in-out infinite alternate;
@@ -278,9 +278,9 @@ input:focus-visible {
 .admin-nav-button {
   position: relative;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 0;
   min-height: 46px;
   width: 100%;
   padding: 7px 10px;
@@ -342,8 +342,7 @@ input:focus-visible {
   text-align: left;
 }
 
-.admin-nav-button strong,
-.admin-nav-button small {
+.admin-nav-button strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -353,11 +352,6 @@ input:focus-visible {
   color: rgba(247, 250, 255, 0.96);
   font-size: 0.9rem;
   font-weight: 780;
-}
-
-.admin-nav-button small {
-  color: rgba(190, 207, 255, 0.7);
-  font-size: 0.7rem;
 }
 
 .account-orb {
@@ -3511,7 +3505,8 @@ body.ban-lock-active .loading-screen {
     inset: 0 auto 0 0;
     z-index: 6;
     display: grid;
-    width: min(312px, 88vw);
+    width: min(336px, 90vw);
+    background: #01040f;
     transform: translateX(calc(-100% - 18px));
     visibility: hidden;
     transition:
@@ -3521,6 +3516,12 @@ body.ban-lock-active .loading-screen {
       24px 0 70px rgba(0, 0, 0, 0.52),
       inset -1px 0 rgba(255, 255, 255, 0.1),
       inset 0 1px rgba(255, 255, 255, 0.1);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .sidebar::before {
+    display: none;
   }
 
   .app-shell.sidebar-open .sidebar {
