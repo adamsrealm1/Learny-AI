@@ -44,10 +44,7 @@ const accountButton = document.querySelector("#accountButton");
 const accountStatusText = document.querySelector("#accountStatusText");
 const accountOrbImage = document.querySelector("#accountOrbImage");
 const adminButton = document.querySelector("#adminButton");
-const adminTopTitle = document.querySelector("#adminTopTitle");
 const adminPortal = document.querySelector("#adminPortal");
-const adminPortalSummary = document.querySelector("#adminPortalSummary");
-const adminAvailabilityPill = document.querySelector("#adminAvailabilityPill");
 const adminAvailabilityText = document.querySelector("#adminAvailabilityText");
 const adminAvailabilityToggle = document.querySelector("#adminAvailabilityToggle");
 const adminAvailabilityLabel = document.querySelector("#adminAvailabilityLabel");
@@ -57,7 +54,6 @@ const adminBansCount = document.querySelector("#adminBansCount");
 const adminAccountsList = document.querySelector("#adminAccountsList");
 const adminAdminsList = document.querySelector("#adminAdminsList");
 const adminBansList = document.querySelector("#adminBansList");
-const adminRefreshButton = document.querySelector("#adminRefreshButton");
 const adminStatusMessage = document.querySelector("#adminStatusMessage");
 const adminBanUsernameForm = document.querySelector("#adminBanUsernameForm");
 const adminUnbanUsernameForm = document.querySelector("#adminUnbanUsernameForm");
@@ -145,6 +141,7 @@ const DEFAULT_PLATFORM = {
   available: true,
   updatedAt: 0,
 };
+const OWNER_ADMIN_USERNAME = "adamsrealm1";
 const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
 const WASMER_API_BASE = "https://learny-ai-adamsrealm1.wasmer.app";
@@ -1053,6 +1050,13 @@ function isCurrentAdmin() {
   return Boolean(currentAccount && currentAccount.isAdmin);
 }
 
+function isCurrentOwnerAdmin() {
+  return (
+    isCurrentAdmin() &&
+    String(currentAccount.username || "").toLowerCase() === OWNER_ADMIN_USERNAME
+  );
+}
+
 function syncComposerAvailability() {
   const composer = chatForm;
   const unavailable = isPlatformUnavailable();
@@ -1656,18 +1660,24 @@ function renderAdminAccess() {
     adminButton.hidden = !visible;
     adminButton.classList.toggle("active", activeView === "admin");
   }
+  renderAdminRoleAccess();
   if (!visible && activeView === "admin") {
     setMainView("chat");
   }
 }
 
+function renderAdminRoleAccess() {
+  const canManageAdmins = isCurrentOwnerAdmin();
+  if (adminGrantForm) {
+    adminGrantForm.hidden = !canManageAdmins;
+  }
+  if (adminRevokeForm) {
+    adminRevokeForm.hidden = !canManageAdmins;
+  }
+}
+
 function renderPlatformState() {
   const available = !isPlatformUnavailable();
-  if (adminAvailabilityPill) {
-    adminAvailabilityPill.textContent = available ? "Available" : "Unavailable";
-    adminAvailabilityPill.classList.toggle("available", available);
-    adminAvailabilityPill.classList.toggle("unavailable", !available);
-  }
   if (adminAvailabilityText) {
     adminAvailabilityText.textContent = available
       ? "Learny is accepting messages."
@@ -1695,9 +1705,6 @@ function setMainView(view) {
   }
   if (messageSearch) {
     messageSearch.hidden = nextView === "admin";
-  }
-  if (adminTopTitle) {
-    adminTopTitle.hidden = nextView !== "admin";
   }
   if (adminButton) {
     adminButton.classList.toggle("active", nextView === "admin");
@@ -1761,13 +1768,18 @@ function renderAdminAccountRow(account, { compact = false } = {}) {
   if (!compact) {
     const actions = document.createElement("div");
     actions.className = "admin-row-actions";
-    actions.append(
-      createAdminMiniAction(account.isAdmin ? "Remove admin" : "Give admin", () =>
-        submitAdminJson("/api/admin/role", {
-          username: account.username,
-          admin: !account.isAdmin,
-        }),
-      ),
+    const actionButtons = [];
+    if (isCurrentOwnerAdmin()) {
+      actionButtons.push(
+        createAdminMiniAction(account.isAdmin ? "Remove admin" : "Give admin", () =>
+          submitAdminJson("/api/admin/role", {
+            username: account.username,
+            admin: !account.isAdmin,
+          }),
+        ),
+      );
+    }
+    actionButtons.push(
       createAdminMiniAction(account.ban ? "Unban" : "Ban", () =>
         submitAdminJson(
           account.ban ? "/api/admin/unban" : "/api/admin/ban",
@@ -1781,6 +1793,7 @@ function renderAdminAccountRow(account, { compact = false } = {}) {
         true,
       ),
     );
+    actions.append(...actionButtons);
     row.append(actions);
   }
 
@@ -1835,16 +1848,12 @@ function renderAdminPortal(data = adminPortalData) {
     return;
   }
   adminPortalData = portal;
+  renderAdminRoleAccess();
   updatePlatform(portal.platform || DEFAULT_PLATFORM);
   const accounts = Array.isArray(portal.accounts) ? portal.accounts : [];
   const admins = Array.isArray(portal.admins) ? portal.admins : [];
   const bans = Array.isArray(portal.bans) ? portal.bans : [];
 
-  if (adminPortalSummary) {
-    adminPortalSummary.textContent =
-      `${accounts.length} ${pluralize(accounts.length, "account")} monitored, ` +
-      `${bans.length} active ${pluralize(bans.length, "ban")}.`;
-  }
   if (adminAccountsCount) {
     adminAccountsCount.textContent = String(accounts.length);
   }
@@ -3561,10 +3570,6 @@ if (accountButton) {
 
 if (adminButton) {
   adminButton.addEventListener("click", () => setMainView("admin"));
-}
-
-if (adminRefreshButton) {
-  adminRefreshButton.addEventListener("click", () => loadAdminPortal());
 }
 
 if (adminAvailabilityToggle) {

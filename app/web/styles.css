@@ -1746,29 +1746,6 @@ body.account-modal-open {
   text-align: right;
 }
 
-.admin-top-title {
-  display: grid;
-  gap: 2px;
-  margin-left: auto;
-  color: rgba(245, 248, 255, 0.92);
-  text-align: right;
-}
-
-.admin-top-title[hidden] {
-  display: none;
-}
-
-.admin-top-title span {
-  color: rgba(169, 189, 255, 0.68);
-  font-size: 0.68rem;
-  font-weight: 750;
-  text-transform: uppercase;
-}
-
-.admin-top-title strong {
-  font-size: 0.9rem;
-}
-
 .chat-panel {
   position: relative;
   display: grid;
@@ -1811,7 +1788,6 @@ body.account-modal-open {
   display: none;
 }
 
-.admin-hero,
 .admin-panel,
 .admin-action-card {
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -1823,20 +1799,6 @@ body.account-modal-open {
   -webkit-backdrop-filter: blur(16px);
 }
 
-.admin-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 148px;
-  padding: 24px;
-  border-radius: 20px;
-  background:
-    radial-gradient(circle at 12% 8%, rgba(96, 144, 255, 0.26), transparent 34%),
-    rgba(14, 15, 22, 0.86);
-}
-
-.admin-hero p,
 .admin-panel-kicker {
   margin: 0;
   color: rgba(157, 184, 255, 0.78);
@@ -1846,35 +1808,12 @@ body.account-modal-open {
   text-transform: uppercase;
 }
 
-.admin-hero h1,
 .admin-panel h2 {
   margin: 4px 0 0;
   color: #f7f9ff;
   letter-spacing: 0;
 }
 
-.admin-hero h1 {
-  font-size: 2.35rem;
-  line-height: 1.05;
-}
-
-.admin-hero span {
-  display: inline-block;
-  margin-top: 10px;
-  color: rgba(225, 231, 255, 0.7);
-  font-size: 0.86rem;
-}
-
-.admin-hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.admin-status-pill,
-.admin-soft-button,
 .admin-action-card button,
 .admin-mini-action {
   display: inline-grid;
@@ -1893,24 +1832,11 @@ body.account-modal-open {
     transform 160ms ease;
 }
 
-.admin-soft-button:hover,
 .admin-action-card button:hover,
 .admin-mini-action:hover {
   border-color: rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.12);
   transform: translateY(-1px);
-}
-
-.admin-status-pill.available {
-  border-color: rgba(94, 230, 132, 0.28);
-  color: #d9ffe4;
-  background: rgba(81, 211, 116, 0.12);
-}
-
-.admin-status-pill.unavailable {
-  border-color: rgba(255, 112, 112, 0.34);
-  color: #ffd6d6;
-  background: rgba(255, 76, 76, 0.13);
 }
 
 .admin-panel {
@@ -3635,7 +3561,6 @@ body.ban-lock-active .loading-screen {
     padding: 20px 14px 120px;
   }
 
-  .admin-hero,
   .admin-availability-panel,
   .admin-panel-heading {
     align-items: flex-start;

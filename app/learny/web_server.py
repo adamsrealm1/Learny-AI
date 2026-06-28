@@ -637,6 +637,9 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             admin = self._require_admin_account()
             if admin is None:
                 return
+            if not _is_owner_admin_account(admin):
+                self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
+                return
             try:
                 body = self._read_json_body()
                 updated = database.set_account_admin(
@@ -1548,6 +1551,12 @@ def _is_admin_account(account: dict[str, Any] | None) -> bool:
         return False
     username = str(account.get("username", ""))
     return bool(account.get("isAdmin")) or username.casefold() == DEFAULT_ADMIN_USERNAME.casefold()
+
+
+def _is_owner_admin_account(account: dict[str, Any] | None) -> bool:
+    if not account:
+        return False
+    return str(account.get("username", "")).casefold() == DEFAULT_ADMIN_USERNAME.casefold()
 
 
 def _public_platform(platform: dict[str, Any]) -> dict[str, Any]:

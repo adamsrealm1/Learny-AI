@@ -114,7 +114,7 @@
         }
       }
     </style>
-    <link rel="stylesheet" href="./app/web/styles.css?v=captcha-crop2">
+    <link rel="stylesheet" href="./app/web/styles.css?v=admin-centerless1">
   </head>
   <body class="site-loading">
     <div class="loading-screen" id="loadingScreen" role="status" aria-label="Loading Learny AI">
@@ -250,9 +250,6 @@
             >
             <span class="message-search-count" id="messageSearchCount" aria-live="polite"></span>
           </label>
-          <div class="admin-top-title" id="adminTopTitle" hidden>
-            <strong>Control Center</strong>
-          </div>
         </header>
 
         <section class="chat-panel" aria-label="Learny chat">
@@ -296,22 +293,10 @@
 
         <section class="admin-portal" id="adminPortal" aria-label="Admin Portal" hidden>
           <div class="admin-portal-scroll">
-            <header class="admin-hero">
-              <div>
-                <h1>Control Center</h1>
-                <span id="adminPortalSummary">No live data yet.</span>
-              </div>
-              <div class="admin-hero-actions">
-                <span class="admin-status-pill" id="adminAvailabilityPill">Checking</span>
-                <button class="admin-soft-button" id="adminRefreshButton" type="button">Refresh</button>
-              </div>
-            </header>
-
             <section class="admin-panel admin-availability-panel">
               <div>
-                <p class="admin-panel-kicker">System Access</p>
-                <h2>Learny availability</h2>
-                <span id="adminAvailabilityText">Learny is accepting messages.</span>
+                <h2>Learny status</h2>
+                <span id="adminAvailabilityText">Learny is available.</span>
               </div>
               <label class="admin-switch">
                 <input id="adminAvailabilityToggle" type="checkbox">
@@ -324,8 +309,7 @@
               <section class="admin-panel">
                 <div class="admin-panel-heading">
                   <div>
-                    <p class="admin-panel-kicker">Accounts</p>
-                    <h2>People</h2>
+                    <h2>Accounts</h2>
                   </div>
                   <span id="adminAccountsCount">0</span>
                 </div>
@@ -335,8 +319,7 @@
               <section class="admin-panel">
                 <div class="admin-panel-heading">
                   <div>
-                    <p class="admin-panel-kicker">Admins</p>
-                    <h2>Operators</h2>
+                    <h2>Admins</h2>
                   </div>
                   <span id="adminAdminsCount">0</span>
                 </div>
@@ -347,8 +330,7 @@
             <section class="admin-panel">
               <div class="admin-panel-heading">
                 <div>
-                  <p class="admin-panel-kicker">Moderation</p>
-                  <h2>Active bans</h2>
+                  <h2>Bans</h2>
                 </div>
                 <span id="adminBansCount">0</span>
               </div>
@@ -409,20 +391,19 @@
 
     <div class="ban-lock" id="banLock" hidden>
       <section class="ban-lock-card" role="alert" aria-live="assertive">
-        <p class="ban-lock-kicker">Access restricted</p>
-        <h1>Learny AI is locked for this session.</h1>
+        <h1>Your account is suspended</h1>
         <dl>
           <div>
-            <dt>Identity</dt>
+            <dt>User Banned</dt>
             <dd id="banLockTarget">Unknown</dd>
           </div>
           <div>
-            <dt>Date</dt>
+            <dt>Date of Ban</dt>
             <dd id="banLockDate">Unknown</dd>
           </div>
           <div>
-            <dt>Reason</dt>
-            <dd id="banLockReason">Access was blocked by Learny moderation.</dd>
+            <dt>Reason for Ban</dt>
+            <dd id="banLockReason">No reason.</dd>
           </div>
         </dl>
       </section>
@@ -609,6 +590,6 @@
     </template>
 
     <script src="./app/web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./app/web/app.js?v=captcha-crop1" defer></script>
+    <script src="./app/web/app.js?v=owner-admin-roles1" defer></script>
   </body>
 </html>

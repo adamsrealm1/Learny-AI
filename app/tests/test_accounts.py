@@ -428,7 +428,7 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(platform_change["status"], 403)
         self.assertEqual(role_change["status"], 403)
 
-    def test_admin_can_grant_admin_portal_access(self) -> None:
+    def test_owner_admin_can_grant_admin_portal_access(self) -> None:
         with run_account_server() as server:
             server.post_json(
                 "/api/accounts/create",
@@ -453,6 +453,49 @@ class AccountWebTests(unittest.TestCase):
         self.assertTrue(promoted["updatedAccount"]["isAdmin"])
         self.assertTrue(login["account"]["isAdmin"])
         self.assertIn("adminPortal", portal)
+
+    def test_non_owner_admin_cannot_add_or_remove_admins(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "portal_user", "password": "strong-password"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "target_user", "password": "strong-password"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "adamsrealm1", "password": "strong-password"},
+            )
+            server.post_json(
+                "/api/admin/role",
+                {"username": "portal_user", "admin": True},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            server.post_json(
+                "/api/accounts/sign-in",
+                {"username": "portal_user", "password": "strong-password"},
+            )
+
+            add_admin = server.post_json_status(
+                "/api/admin/role",
+                {"username": "target_user", "admin": True},
+            )
+            remove_admin = server.post_json_status(
+                "/api/admin/role",
+                {"username": "portal_user", "admin": False},
+            )
+            portal = server.get_json("/api/admin/portal")["adminPortal"]
+
+        self.assertEqual(add_admin["status"], 403)
+        self.assertEqual(remove_admin["status"], 403)
+        self.assertCountEqual(
+            [account["username"] for account in portal["admins"]],
+            ["adamsrealm1", "portal_user"],
+        )
 
     def test_admin_can_make_learny_unavailable_without_calling_generator(self) -> None:
         CountingAnswerGenerator.calls = 0
