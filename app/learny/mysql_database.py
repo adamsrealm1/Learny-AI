@@ -14,6 +14,7 @@ from .conversation import ConversationHistory
 from .database import (
     DEFAULT_ADMIN_USERNAME,
     DEFAULT_RATE_LIMIT_TIME_ZONE,
+    MAX_ACCOUNT_CHATS,
     PLATFORM_AVAILABLE_KEY,
     RATE_LIMIT_LIMIT,
     RATE_LIMIT_WINDOW_MS,
@@ -26,6 +27,7 @@ from .database import (
     _clean_ban_reason,
     _clean_ban_target,
     _clean_chat_payload,
+    _clean_email,
     _clean_identifier,
     _clean_message_payload,
     _clean_rate_limit_identity,
@@ -106,6 +108,7 @@ class MySQLLearnyDatabase:
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                 username VARCHAR(24) NOT NULL,
                 username_key VARCHAR(24) NOT NULL,
+                email VARCHAR(254) NOT NULL DEFAULT '',
                 password_salt VARCHAR(64) NOT NULL,
                 password_hash VARCHAR(128) NOT NULL,
                 profile_picture MEDIUMTEXT NULL,
@@ -221,6 +224,11 @@ class MySQLLearnyDatabase:
                     cursor.execute(
                         "ALTER TABLE accounts ADD COLUMN profile_picture MEDIUMTEXT NULL AFTER password_hash"
                     )
+                cursor.execute("SHOW COLUMNS FROM accounts LIKE 'email'")
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        "ALTER TABLE accounts ADD COLUMN email VARCHAR(254) NOT NULL DEFAULT '' AFTER username_key"
+                    )
                 cursor.execute("SHOW COLUMNS FROM messages LIKE 'history_text'")
                 if cursor.fetchone() is None:
                     cursor.execute(
@@ -252,8 +260,9 @@ class MySQLLearnyDatabase:
                     (PLATFORM_AVAILABLE_KEY, "1", _now_ms()),
                 )
 
-    def create_account(self, username: str, password: str) -> dict[str, Any]:
+    def create_account(self, username: str, password: str, email: str) -> dict[str, Any]:
         username = _clean_username(username)
+        email = _clean_email(email, required=True)
         _validate_password(password)
         salt = secrets.token_hex(16)
         password_hash = _hash_password(password, salt)
@@ -265,13 +274,14 @@ class MySQLLearnyDatabase:
                     cursor.execute(
                         """
                         INSERT INTO accounts
-                            (username, username_key, password_salt, password_hash, profile_picture,
+                            (username, username_key, email, password_salt, password_hash, profile_picture,
                              is_admin, created_at, last_seen_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         """,
                         (
                             username,
                             username.casefold(),
+                            email,
                             salt,
                             password_hash,
                             None,
@@ -292,6 +302,7 @@ class MySQLLearnyDatabase:
         return {
             "id": account_id,
             "username": username,
+            "email": email,
             "profilePicture": None,
             "isAdmin": _is_default_admin_username(username),
             "attachmentsVerifiedAt": 0,
@@ -299,8 +310,9 @@ class MySQLLearnyDatabase:
             "lastSeenAt": now,
         }
 
-    def authenticate(self, username: str, password: str) -> dict[str, Any]:
+    def authenticate(self, username: str, password: str, email: str | None = None) -> dict[str, Any]:
         username = _clean_username(username)
+        clean_email = _clean_email(email or "", required=False)
         now = _now_ms()
         with self._lock, self._connect() as connection:
             with connection.cursor() as cursor:
@@ -311,6 +323,8 @@ class MySQLLearnyDatabase:
 
                 expected_hash = _hash_password(password, str(row["password_salt"]))
                 if not hmac.compare_digest(expected_hash, str(row["password_hash"])):
+                    raise AuthenticationError("Account could not be authenticated.")
+                if clean_email and clean_email != str(row.get("email") or "").casefold():
                     raise AuthenticationError("Account could not be authenticated.")
 
                 account_id = int(row["id"])
@@ -323,6 +337,7 @@ class MySQLLearnyDatabase:
         return {
             "id": account_id,
             "username": str(row["username"]),
+            "email": str(row.get("email") or ""),
             "profilePicture": row.get("profile_picture"),
             "isAdmin": bool(row.get("is_admin")) or _is_default_admin_username(str(row["username"])),
             "attachmentsVerifiedAt": int(row.get("attachments_verified_at") or 0),
@@ -399,6 +414,7 @@ class MySQLLearnyDatabase:
         return {
             "id": int(row["id"]),
             "username": str(row["username"]),
+            "email": str(row.get("email") or ""),
             "profilePicture": row.get("profile_picture"),
             "isAdmin": bool(row.get("is_admin")) or _is_default_admin_username(str(row["username"])),
             "attachmentsVerifiedAt": int(row.get("attachments_verified_at") or 0),
@@ -462,6 +478,7 @@ class MySQLLearnyDatabase:
         return {
             "id": account_id,
             "username": str(row["username"]),
+            "email": str(row.get("email") or ""),
             "profilePicture": row.get("profile_picture"),
             "isAdmin": bool(row.get("is_admin")) or _is_default_admin_username(str(row["username"])),
             "attachmentsVerifiedAt": int(row.get("attachments_verified_at") or 0),
@@ -496,6 +513,7 @@ class MySQLLearnyDatabase:
                     SELECT
                         accounts.id,
                         accounts.username,
+                        accounts.email,
                         accounts.profile_picture,
                         accounts.is_admin,
                         accounts.attachments_verified_at,
@@ -842,8 +860,9 @@ class MySQLLearnyDatabase:
                     FROM chats
                     WHERE account_id = %s
                     ORDER BY updated_at DESC
+                    LIMIT %s
                     """,
-                    (account_id,),
+                    (account_id, MAX_ACCOUNT_CHATS),
                 )
                 chat_rows = cursor.fetchall()
                 cursor.execute(
@@ -874,7 +893,7 @@ class MySQLLearnyDatabase:
         ]
 
     def replace_account_chats(self, account_id: int, chats: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        clean_chats = [_clean_chat_payload(chat) for chat in chats[:250]]
+        clean_chats = _limit_chat_payloads([_clean_chat_payload(chat) for chat in chats[:250]])
         incoming_ids = [chat["id"] for chat in clean_chats]
 
         with self._lock, self._connect() as connection:
@@ -943,6 +962,7 @@ class MySQLLearnyDatabase:
                                 for message in messages
                             ],
                         )
+                _mysql_prune_extra_chats(cursor, account_id)
 
         return self.list_chats(account_id)
 
@@ -972,6 +992,7 @@ class MySQLLearnyDatabase:
                     """,
                     (clean_chat_id, account_id, clean_title, clean_session_id, now, now),
                 )
+                _mysql_prune_extra_chats(cursor, account_id)
 
     def append_message(
         self,
@@ -1053,6 +1074,30 @@ class MySQLLearnyDatabase:
                 history.add(pending_user, text)
                 pending_user = ""
         return history
+
+
+def _limit_chat_payloads(chats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(chats, key=lambda chat: int(chat["updatedAt"]), reverse=True)[:MAX_ACCOUNT_CHATS]
+
+
+def _mysql_prune_extra_chats(cursor: Any, account_id: int) -> None:
+    cursor.execute(
+        """
+        DELETE FROM chats
+        WHERE account_id = %s
+          AND id NOT IN (
+            SELECT id
+            FROM (
+              SELECT id
+              FROM chats
+              WHERE account_id = %s
+              ORDER BY updated_at DESC
+              LIMIT %s
+            ) AS kept_chats
+          )
+        """,
+        (account_id, account_id, MAX_ACCOUNT_CHATS),
+    )
 
 
 def mysql_config_from_env() -> dict[str, Any] | None:

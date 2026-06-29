@@ -424,6 +424,7 @@ def post_json_with_opener(
     path: str,
     payload: dict[str, Any],
 ) -> dict[str, Any]:
+    payload = account_create_payload(path, payload)
     request = urllib.request.Request(
         f"{base_url}{path}",
         data=json.dumps(payload).encode("utf-8"),
@@ -432,6 +433,14 @@ def post_json_with_opener(
     )
     with open_request(opener, request, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def account_create_payload(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    clean_payload = dict(payload)
+    if path == "/api/accounts/create" and "email" not in clean_payload:
+        username = str(clean_payload.get("username", "learny")).strip() or "learny"
+        clean_payload["email"] = f"{username.casefold()}@example.test"
+    return clean_payload
 
 
 def verified_attachment_opener(base_url: str, username: str) -> tuple[Any, str]:

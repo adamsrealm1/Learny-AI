@@ -408,6 +408,10 @@ input:focus-visible {
   overflow: hidden;
 }
 
+.guest-access-open {
+  overflow: hidden;
+}
+
 .app-shell.account-mode {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -444,6 +448,7 @@ input:focus-visible {
 .account-modal-view[hidden],
 .account-danger-confirm[hidden],
 .rate-limit-modal[hidden],
+.guest-access-modal[hidden],
 .attachment-auth-modal[hidden] {
   display: none;
 }
@@ -631,6 +636,196 @@ input:focus-visible {
   background: #c9cbd2;
   mask: url("../icon_library/warning.png") center / contain no-repeat;
   -webkit-mask: url("../icon_library/warning.png") center / contain no-repeat;
+}
+
+.guest-access-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.guest-access-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(82, 111, 255, 0.12), transparent 34%),
+    rgba(0, 0, 0, 0.76);
+  backdrop-filter: blur(16px) saturate(1.08);
+  -webkit-backdrop-filter: blur(16px) saturate(1.08);
+  animation: modalBackdropIn 220ms ease both;
+}
+
+.guest-access-dialog {
+  position: relative;
+  display: grid;
+  gap: 18px;
+  width: min(520px, calc(100vw - 30px));
+  padding: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 14% 0, rgba(101, 128, 255, 0.24), transparent 34%),
+    linear-gradient(180deg, rgba(27, 28, 36, 0.98), rgba(11, 12, 17, 0.96));
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.12),
+    0 34px 110px rgba(0, 0, 0, 0.68);
+  color: #fff;
+  overflow: hidden;
+  animation: modalPanelIn 340ms cubic-bezier(0.2, 0.9, 0.2, 1) both;
+}
+
+.guest-access-dialog::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), transparent 30%, rgba(102, 138, 255, 0.16));
+  pointer-events: none;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  -webkit-mask-composite: xor;
+  padding: 1px;
+}
+
+.guest-access-dialog > * {
+  position: relative;
+  z-index: 1;
+}
+
+.guest-access-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.09);
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.guest-access-close:hover,
+.guest-access-close:focus-visible {
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(1.04);
+}
+
+.guest-access-orb {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.12),
+    0 18px 48px rgba(54, 92, 255, 0.18);
+}
+
+.guest-access-orb img {
+  width: 54px;
+  height: 54px;
+  object-fit: contain;
+}
+
+.guest-access-copy {
+  display: grid;
+  gap: 10px;
+  padding-right: 22px;
+}
+
+.guest-access-copy h2 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(1.8rem, 5vw, 2.55rem);
+  line-height: 1.02;
+  font-weight: 820;
+}
+
+.guest-access-copy p {
+  margin: 0;
+  color: rgba(235, 237, 248, 0.78);
+  font-size: 1rem;
+  line-height: 1.55;
+  font-weight: 600;
+}
+
+.guest-access-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1.2fr;
+  gap: 10px;
+}
+
+.guest-access-primary,
+.guest-access-secondary {
+  min-width: 0;
+  min-height: 46px;
+  padding: 0 16px;
+  border-radius: 999px;
+  font-size: 0.88rem;
+  font-weight: 760;
+  transition:
+    border-color 170ms ease,
+    background 170ms ease,
+    box-shadow 170ms ease,
+    transform 170ms ease,
+    filter 170ms ease;
+}
+
+.guest-access-primary {
+  border-color: rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(135deg, rgba(88, 101, 255, 0.98), rgba(60, 144, 255, 0.98)),
+    var(--accent);
+  color: #fff;
+  box-shadow:
+    0 18px 48px rgba(59, 103, 255, 0.28),
+    inset 0 1px rgba(255, 255, 255, 0.3);
+}
+
+.guest-access-secondary {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.075);
+  color: rgba(244, 246, 255, 0.9);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.guest-access-primary:hover,
+.guest-access-primary:focus-visible,
+.guest-access-secondary:hover,
+.guest-access-secondary:focus-visible {
+  transform: translateY(-1px);
+  filter: brightness(1.06);
+}
+
+.guest-access-primary:focus-visible,
+.guest-access-secondary:focus-visible,
+.guest-access-close:focus-visible {
+  outline: 2px solid rgba(126, 156, 255, 0.9);
+  outline-offset: 3px;
+}
+
+@media (max-width: 540px) {
+  .guest-access-dialog {
+    padding: 24px;
+  }
+
+  .guest-access-copy {
+    padding-right: 0;
+  }
+
+  .guest-access-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .attachment-auth-modal {
@@ -1080,6 +1275,12 @@ input:focus-visible {
 .account-modal-form label span {
   color: rgba(232, 232, 240, 0.78);
   font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.account-modal-form label span small {
+  color: rgba(232, 232, 240, 0.48);
+  font-size: 0.68rem;
   font-weight: 650;
 }
 

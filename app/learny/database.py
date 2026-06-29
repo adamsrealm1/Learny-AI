@@ -23,6 +23,7 @@ RATE_LIMIT_LIMIT = 200
 RATE_LIMIT_WINDOW_MS = 86_400_000
 DEFAULT_RATE_LIMIT_TIME_ZONE = "UTC"
 DEFAULT_ADMIN_USERNAME = "adamsrealm1"
+MAX_ACCOUNT_CHATS = 10
 PLATFORM_AVAILABLE_KEY = "learny_available"
 
 
@@ -76,6 +77,7 @@ class LearnyDatabase:
                 CREATE TABLE IF NOT EXISTS accounts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    email TEXT NOT NULL DEFAULT '',
                     password_salt TEXT NOT NULL,
                     password_hash TEXT NOT NULL,
                     profile_picture TEXT,
@@ -167,6 +169,7 @@ class LearnyDatabase:
                 """
             )
             self._ensure_profile_picture_column(connection)
+            self._ensure_account_email_column(connection)
             self._ensure_account_admin_column(connection)
             self._ensure_attachments_verified_column(connection)
             self._ensure_message_history_column(connection)
@@ -180,6 +183,14 @@ class LearnyDatabase:
         }
         if "profile_picture" not in columns:
             connection.execute("ALTER TABLE accounts ADD COLUMN profile_picture TEXT")
+
+    def _ensure_account_email_column(self, connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(accounts)").fetchall()
+        }
+        if "email" not in columns:
+            connection.execute("ALTER TABLE accounts ADD COLUMN email TEXT NOT NULL DEFAULT ''")
 
     def _ensure_message_history_column(self, connection: sqlite3.Connection) -> None:
         columns = {
@@ -224,8 +235,9 @@ class LearnyDatabase:
             (PLATFORM_AVAILABLE_KEY, "1", now),
         )
 
-    def create_account(self, username: str, password: str) -> dict[str, Any]:
+    def create_account(self, username: str, password: str, email: str) -> dict[str, Any]:
         username = _clean_username(username)
+        email = _clean_email(email, required=True)
         _validate_password(password)
         salt = secrets.token_hex(16)
         password_hash = _hash_password(password, salt)
@@ -236,11 +248,12 @@ class LearnyDatabase:
                 cursor = connection.execute(
                     """
                     INSERT INTO accounts
-                        (username, password_salt, password_hash, profile_picture, is_admin, created_at, last_seen_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (username, email, password_salt, password_hash, profile_picture, is_admin, created_at, last_seen_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         username,
+                        email,
                         salt,
                         password_hash,
                         None,
@@ -261,6 +274,7 @@ class LearnyDatabase:
         return {
             "id": account_id,
             "username": username,
+            "email": email,
             "profilePicture": None,
             "isAdmin": _is_default_admin_username(username),
             "attachmentsVerifiedAt": 0,
@@ -268,8 +282,9 @@ class LearnyDatabase:
             "lastSeenAt": now,
         }
 
-    def authenticate(self, username: str, password: str) -> dict[str, Any]:
+    def authenticate(self, username: str, password: str, email: str | None = None) -> dict[str, Any]:
         username = _clean_username(username)
+        clean_email = _clean_email(email or "", required=False)
         now = _now_ms()
         with self._lock, self._connect() as connection:
             row = connection.execute(
@@ -281,6 +296,8 @@ class LearnyDatabase:
 
             expected_hash = _hash_password(password, str(row["password_salt"]))
             if not hmac.compare_digest(expected_hash, str(row["password_hash"])):
+                raise AuthenticationError("Account could not be authenticated.")
+            if clean_email and clean_email != _row_string(row, "email").casefold():
                 raise AuthenticationError("Account could not be authenticated.")
 
             connection.execute(
@@ -295,6 +312,7 @@ class LearnyDatabase:
         return {
             "id": int(row["id"]),
             "username": str(row["username"]),
+            "email": _row_string(row, "email"),
             "profilePicture": row["profile_picture"],
             "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
             "attachmentsVerifiedAt": int(row["attachments_verified_at"]),
@@ -369,6 +387,7 @@ class LearnyDatabase:
         return {
             "id": int(row["id"]),
             "username": str(row["username"]),
+            "email": _row_string(row, "email"),
             "profilePicture": row["profile_picture"],
             "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
             "attachmentsVerifiedAt": int(row["attachments_verified_at"]),
@@ -435,6 +454,7 @@ class LearnyDatabase:
         return {
             "id": int(row["id"]),
             "username": str(row["username"]),
+            "email": _row_string(row, "email"),
             "profilePicture": row["profile_picture"],
             "isAdmin": _row_bool(row, "is_admin") or _is_default_admin_username(str(row["username"])),
             "attachmentsVerifiedAt": int(row["attachments_verified_at"]),
@@ -474,6 +494,7 @@ class LearnyDatabase:
                 SELECT
                     accounts.id,
                     accounts.username,
+                    accounts.email,
                     accounts.profile_picture,
                     accounts.is_admin,
                     accounts.attachments_verified_at,
@@ -743,8 +764,9 @@ class LearnyDatabase:
                 FROM chats
                 WHERE account_id = ?
                 ORDER BY updated_at DESC
+                LIMIT ?
                 """,
-                (account_id,),
+                (account_id, MAX_ACCOUNT_CHATS),
             ).fetchall()
             message_rows = connection.execute(
                 """
@@ -774,7 +796,7 @@ class LearnyDatabase:
         ]
 
     def replace_account_chats(self, account_id: int, chats: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        clean_chats = [_clean_chat_payload(chat) for chat in chats[:250]]
+        clean_chats = _limit_chat_payloads([_clean_chat_payload(chat) for chat in chats[:250]])
         incoming_ids = [chat["id"] for chat in clean_chats]
 
         with self._lock, self._connect() as connection:
@@ -840,6 +862,7 @@ class LearnyDatabase:
                         for message in messages
                     ],
                 )
+            _prune_extra_chats(connection, account_id)
 
         return self.list_chats(account_id)
 
@@ -868,6 +891,7 @@ class LearnyDatabase:
                 """,
                 (clean_chat_id, account_id, clean_title, clean_session_id, now, now),
             )
+            _prune_extra_chats(connection, account_id)
 
     def append_message(
         self,
@@ -957,6 +981,28 @@ def _clean_username(username: str) -> str:
     return cleaned
 
 
+def _clean_email(email: str, *, required: bool) -> str:
+    cleaned = str(email or "").strip().casefold()
+    if not cleaned:
+        if required:
+            raise AccountError("Account input is invalid.")
+        return ""
+    if len(cleaned) > 254 or any(character.isspace() for character in cleaned):
+        raise AccountError("Account input is invalid.")
+    if cleaned.count("@") != 1:
+        raise AccountError("Account input is invalid.")
+    local, domain = cleaned.split("@", 1)
+    if not local or not domain or len(local) > 64:
+        raise AccountError("Account input is invalid.")
+    if "." not in domain or domain.startswith(".") or domain.endswith("."):
+        raise AccountError("Account input is invalid.")
+    if any(not (character.isalnum() or character in ".!#$%&'*+/=?^_`{|}~-") for character in local):
+        raise AccountError("Account input is invalid.")
+    if any(not (character.isalnum() or character in ".-") for character in domain):
+        raise AccountError("Account input is invalid.")
+    return cleaned
+
+
 def _is_default_admin_username(username: str) -> bool:
     return str(username).casefold() == DEFAULT_ADMIN_USERNAME.casefold()
 
@@ -975,6 +1021,7 @@ def _account_from_row(row: Any) -> dict[str, Any]:
     return {
         "id": int(row["id"]),
         "username": username,
+        "email": _row_string(row, "email"),
         "profilePicture": profile_picture or None,
         "isAdmin": is_admin,
         "attachmentsVerifiedAt": int(row["attachments_verified_at"]),
@@ -1078,6 +1125,27 @@ def _clean_chat_payload(chat: dict[str, Any]) -> dict[str, Any]:
         "updatedAt": _clean_timestamp(chat.get("updatedAt"), now),
         "messages": [_clean_message_payload(message) for message in messages[:1000]],
     }
+
+
+def _limit_chat_payloads(chats: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(chats, key=lambda chat: int(chat["updatedAt"]), reverse=True)[:MAX_ACCOUNT_CHATS]
+
+
+def _prune_extra_chats(connection: sqlite3.Connection, account_id: int) -> None:
+    connection.execute(
+        """
+        DELETE FROM chats
+        WHERE account_id = ?
+          AND id NOT IN (
+            SELECT id
+            FROM chats
+            WHERE account_id = ?
+            ORDER BY updated_at DESC
+            LIMIT ?
+          )
+        """,
+        (account_id, account_id, MAX_ACCOUNT_CHATS),
+    )
 
 
 def _clean_message_payload(message: dict[str, Any]) -> dict[str, Any]:

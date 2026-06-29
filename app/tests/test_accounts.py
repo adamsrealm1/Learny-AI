@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.cookiejar
 import json
+import time
 import threading
 import unittest
 import urllib.error
@@ -89,22 +90,88 @@ class NoAnswerGenerator:
         return None
 
 
+def account_create_payload(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    clean_payload = dict(payload)
+    if path == "/api/accounts/create" and "email" not in clean_payload:
+        username = str(clean_payload.get("username", "learny")).strip() or "learny"
+        clean_payload["email"] = f"{username.casefold()}@example.test"
+    return clean_payload
+
+
 class AccountWebTests(unittest.TestCase):
     def test_create_account_sets_cookie_and_reports_stats(self) -> None:
         with run_account_server() as server:
             data = server.post_json(
                 "/api/accounts/create",
-                {"username": "adamsrealm1", "password": "strong-password"},
+                {
+                    "username": "adamsrealm1",
+                    "email": "adam@example.com",
+                    "password": "strong-password",
+                },
             )
             account = server.get_json("/api/account")
 
         self.assertTrue(data["authenticated"])
         self.assertEqual(data["account"]["username"], "adamsrealm1")
+        self.assertEqual(data["account"]["email"], "***m@example.com")
+        self.assertEqual(data["account"]["maskedEmail"], "***m@example.com")
+        self.assertNotIn("adam@example.com", json.dumps(data))
         self.assertTrue(data["account"]["canResetRateLimits"])
         self.assertTrue(account["authenticated"])
+        self.assertEqual(account["account"]["email"], "***m@example.com")
         self.assertTrue(account["account"]["canResetRateLimits"])
         self.assertEqual(account["stats"]["chats"], 0)
         self.assertEqual(account["stats"]["messages"], 0)
+
+    def test_create_account_requires_email_and_sign_in_email_is_optional(self) -> None:
+        with run_account_server() as server:
+            missing_email = server.post_json_status(
+                "/api/accounts/create",
+                {"username": "email_user", "email": "", "password": "strong-password"},
+            )
+            invalid_email = server.post_json_status(
+                "/api/accounts/create",
+                {"username": "email_user", "email": "not-email", "password": "strong-password"},
+            )
+            created = server.post_json(
+                "/api/accounts/create",
+                {
+                    "username": "email_user",
+                    "email": "person@example.com",
+                    "password": "strong-password",
+                },
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            wrong_email = server.post_json_status(
+                "/api/accounts/sign-in",
+                {
+                    "username": "email_user",
+                    "email": "wrong@example.com",
+                    "password": "strong-password",
+                },
+            )
+            signed_in_without_email = server.post_json(
+                "/api/accounts/sign-in",
+                {"username": "email_user", "password": "strong-password"},
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            signed_in_with_email = server.post_json(
+                "/api/accounts/sign-in",
+                {
+                    "username": "email_user",
+                    "email": "person@example.com",
+                    "password": "strong-password",
+                },
+            )
+
+        self.assertEqual(missing_email["status"], 400)
+        self.assertEqual(invalid_email["status"], 400)
+        self.assertTrue(created["authenticated"])
+        self.assertEqual(created["account"]["email"], "***son@example.com")
+        self.assertEqual(wrong_email["status"], 401)
+        self.assertTrue(signed_in_without_email["authenticated"])
+        self.assertTrue(signed_in_with_email["authenticated"])
+        self.assertEqual(signed_in_with_email["account"]["email"], "***son@example.com")
 
     def test_profile_picture_can_be_added_and_removed(self) -> None:
         profile_picture = (
@@ -172,6 +239,79 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(len(data["chats"]), 1)
         self.assertEqual(data["chats"][0]["title"], "First chat")
         self.assertEqual([message["text"] for message in data["chats"][0]["messages"]], ["hello", "hi"])
+
+    def test_guest_cannot_use_saved_chat_storage(self) -> None:
+        with run_account_server() as server:
+            get_chats = server.get_json_status("/api/chats")
+            sync_chats = server.post_json_status(
+                "/api/chats/sync",
+                {
+                    "chats": [
+                        {
+                            "id": "guest-chat",
+                            "title": "Guest should not save",
+                            "sessionId": "guest-session",
+                            "messages": [{"speaker": "You", "text": "do not save"}],
+                        }
+                    ]
+                },
+            )
+
+        self.assertEqual(get_chats["status"], 401)
+        self.assertEqual(sync_chats["status"], 401)
+
+    def test_signed_in_chat_sync_caps_saved_chats_at_ten(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "ten_chat_user", "password": "strong-password"},
+            )
+            synced = server.post_json(
+                "/api/chats/sync",
+                {
+                    "chats": [
+                        {
+                            "id": f"chat-{index}",
+                            "title": f"Chat {index}",
+                            "sessionId": f"session-{index}",
+                            "createdAt": index + 1,
+                            "updatedAt": index + 1,
+                            "messages": [{"speaker": "You", "text": f"message {index}"}],
+                        }
+                        for index in range(12)
+                    ]
+                },
+            )
+            data = server.get_json("/api/chats")
+
+        self.assertEqual(len(synced["chats"]), 10)
+        self.assertEqual(len(data["chats"]), 10)
+        self.assertEqual([chat["id"] for chat in data["chats"]], [f"chat-{index}" for index in range(11, 1, -1)])
+        self.assertEqual(synced["stats"]["chats"], 10)
+
+    def test_signed_in_ask_caps_saved_conversations_at_ten(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "ask_chat_cap_user", "password": "strong-password"},
+            )
+            for index in range(12):
+                server.post_json(
+                    "/api/ask",
+                    {
+                        "message": f"hello {index}",
+                        "chatId": f"ask-chat-{index}",
+                        "sessionId": f"ask-session-{index}",
+                    },
+                )
+                time.sleep(0.005)
+            data = server.get_json("/api/chats")
+
+        self.assertEqual(len(data["chats"]), 10)
+        self.assertEqual(
+            [chat["id"] for chat in data["chats"]],
+            [f"ask-chat-{index}" for index in range(11, 1, -1)],
+        )
 
     def test_signed_in_ask_persists_messages_and_uses_chat_history(self) -> None:
         with run_account_server() as server:
@@ -900,7 +1040,7 @@ class AccountWebTests(unittest.TestCase):
         self.assertFalse(account["authenticated"])
         self.assertEqual(unauthorized, 401)
 
-    def test_account_popup_lives_on_main_app_only(self) -> None:
+    def test_account_interface_lives_on_main_app_only(self) -> None:
         with run_account_server() as server:
             html = server.get_text("/")
             removed_routes = [
@@ -909,7 +1049,7 @@ class AccountWebTests(unittest.TestCase):
                 server.get_status("/create-account"),
             ]
 
-        self.assertIn('id="accountModal"', html)
+        self.assertIn('id="accountInterface"', html)
         self.assertIn('data-account-view="sign-in"', html)
         self.assertIn('data-account-view="create-account"', html)
         self.assertIn('data-account-view="myaccount"', html)
@@ -1067,7 +1207,7 @@ class run_account_server:
         (root / "index.html").write_text(
             """
             <main>Learny</main>
-            <div id="accountModal">
+            <div id="accountInterface">
               <div data-account-view="sign-in"></div>
               <div data-account-view="create-account"></div>
               <div data-account-view="myaccount"></div>
@@ -1135,6 +1275,7 @@ class run_account_server:
         payload: dict[str, Any],
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        payload = account_create_payload(path, payload)
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             data=json.dumps(payload).encode("utf-8"),
@@ -1150,6 +1291,7 @@ class run_account_server:
         payload: dict[str, Any],
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
+        payload = account_create_payload(path, payload)
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             data=json.dumps(payload).encode("utf-8"),
@@ -1179,6 +1321,7 @@ class run_account_server:
         payload: dict[str, Any],
         headers: dict[str, str] | None = None,
     ) -> Any:
+        payload = account_create_payload(path, payload)
         request_headers = {"Content-Type": "application/json", **(headers or {})}
         request = urllib.request.Request(
             f"{self.base_url}{path}",

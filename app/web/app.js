@@ -21,6 +21,14 @@ const rateLimitPopupSeconds = document.querySelector("#rateLimitPopupSeconds");
 const rateLimitPopupUnit = document.querySelector("#rateLimitPopupUnit");
 const rateLimitPopupFill = document.querySelector("#rateLimitPopupFill");
 const rateLimitDescription = document.querySelector("#rateLimitDescription");
+const guestAccessModal = document.querySelector("#guestAccessModal");
+const guestAccessBackdrop = document.querySelector("#guestAccessBackdrop");
+const guestAccessClose = document.querySelector("#guestAccessClose");
+const guestAccessDismiss = document.querySelector("#guestAccessDismiss");
+const guestAccessCreate = document.querySelector("#guestAccessCreate");
+const guestAccessSignIn = document.querySelector("#guestAccessSignIn");
+const guestAccessTitle = document.querySelector("#guestAccessTitle");
+const guestAccessDescription = document.querySelector("#guestAccessDescription");
 const attachmentAuthModal = document.querySelector("#attachmentAuthModal");
 const attachmentAuthBackdrop = document.querySelector("#attachmentAuthBackdrop");
 const attachmentAuthClose = document.querySelector("#attachmentAuthClose");
@@ -86,6 +94,7 @@ const signInMessage = document.querySelector("#signInMessage");
 const createAccountMessage = document.querySelector("#createAccountMessage");
 const accountAvatarImage = document.querySelector("#accountAvatarImage");
 const accountModalUsername = document.querySelector("#accountModalUsername");
+const accountModalEmail = document.querySelector("#accountModalEmail");
 const accountModalCreated = document.querySelector("#accountModalCreated");
 const accountChatCount = document.querySelector("#accountChatCount");
 const accountMessageCount = document.querySelector("#accountMessageCount");
@@ -118,6 +127,8 @@ const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024;
 const ATTACHMENT_LIMIT = 10;
+const GUEST_CHAT_LIMIT = 1;
+const SIGNED_IN_CHAT_LIMIT = 10;
 const ATTACHMENT_EXTENSIONS = new Set(["txt", "md", "log", "docx", "rtf", "pdf", "csv", "json", "xml"]);
 const RECAPTCHA_SCRIPT_ID = "learny-recaptcha-script";
 const COPY_RESET_DELAY_MS = 10000;
@@ -243,8 +254,8 @@ function isAllowedAttachmentFile(file) {
   return Boolean(meta && file.size <= ATTACHMENT_MAX_BYTES);
 }
 
-let chats = loadStoredChats();
-let activeChatId = localStorage.getItem(ACTIVE_CHAT_KEY) || "";
+let chats = [];
+let activeChatId = "";
 let sessionId = "";
 let rateLimitSessionId = localStorage.getItem(RATE_LIMIT_SESSION_KEY) || "";
 let isSending = false;
@@ -917,10 +928,28 @@ function loadStoredChats() {
 }
 
 function saveChats() {
+  trimChatsToAllowedLimit();
+  if (!currentAccount) {
+    clearStoredChatState();
+    return;
+  }
+
   localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
-  if (currentAccount && serverChatsLoaded) {
+  if (activeChatId) {
+    localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
+  }
+  if (sessionId) {
+    localStorage.setItem(SESSION_KEY, sessionId);
+  }
+  if (serverChatsLoaded) {
     queueServerChatSync();
   }
+}
+
+function clearStoredChatState() {
+  localStorage.removeItem(CHATS_KEY);
+  localStorage.removeItem(ACTIVE_CHAT_KEY);
+  localStorage.removeItem(SESSION_KEY);
 }
 
 function normalizeRateLimit(rateLimit) {
@@ -1253,6 +1282,55 @@ function closeRateLimitPopup() {
   if (!isRateLimited()) {
     syncComposerAvailability();
   }
+}
+
+const GUEST_ACCESS_COPY = {
+  chatLimit: {
+    title: "Guest chats are temporary",
+    description:
+      "Guests can keep one conversation open at a time, and it resets when the page refreshes. Create a free account to keep up to 10 saved conversations with their messages.",
+  },
+  attachments: {
+    title: "File uploads need an account",
+    description:
+      "Files can include private information, so Learny only accepts uploads from signed-in accounts. Create a free account or sign in, then you can attach up to 10 files.",
+  },
+};
+
+function openGuestAccessPopup(reason = "chatLimit") {
+  if (!guestAccessModal) {
+    return;
+  }
+  const copy = GUEST_ACCESS_COPY[reason] || GUEST_ACCESS_COPY.chatLimit;
+  if (guestAccessTitle) {
+    guestAccessTitle.textContent = copy.title;
+  }
+  if (guestAccessDescription) {
+    guestAccessDescription.textContent = copy.description;
+  }
+
+  guestAccessModal.hidden = false;
+  document.body.classList.add("guest-access-open");
+  window.setTimeout(() => {
+    if (reason === "attachments" && guestAccessCreate) {
+      guestAccessCreate.focus();
+    } else if (guestAccessDismiss) {
+      guestAccessDismiss.focus();
+    }
+  }, 70);
+}
+
+function closeGuestAccessPopup() {
+  if (!guestAccessModal || guestAccessModal.hidden) {
+    return;
+  }
+  guestAccessModal.hidden = true;
+  document.body.classList.remove("guest-access-open");
+}
+
+function openAccountFromGuestAccess(view) {
+  closeGuestAccessPopup();
+  openAccountModal(view);
 }
 
 function normalizeCaptchaConfig(config) {
@@ -1588,7 +1666,7 @@ function setAttachmentAuthBusy(busy) {
 function openVerifiedFilePicker() {
   if (!currentAccount) {
     clearSelectedAttachments();
-    openAccountModal("sign-in");
+    openGuestAccessPopup("attachments");
     return;
   }
   if (!attachmentVerificationIsValid()) {
@@ -1602,7 +1680,7 @@ async function handleAttachmentAuthSubmit(event) {
   event.preventDefault();
   if (!currentAccount || !attachmentAuthForm) {
     closeAttachmentAuthPopup();
-    openAccountModal("sign-in");
+    openGuestAccessPopup("attachments");
     return;
   }
   const formData = new FormData(attachmentAuthForm);
@@ -1694,7 +1772,7 @@ function updateAccountButton() {
   }
 
   accountButton.classList.remove("signed-in");
-  accountStatusText.textContent = "Sign in to sync";
+  accountStatusText.textContent = "Sign in or create an account";
   renderAdminAccess();
 }
 
@@ -1724,8 +1802,8 @@ function renderPlatformState() {
   const available = !isPlatformUnavailable();
   if (adminAvailabilityText) {
     adminAvailabilityText.textContent = available
-      ? "Learny is accepting messages."
-      : "Learny is paused for everyone.";
+      ? "Learny is available."
+      : "Learny is unavailable.";
   }
   if (adminAvailabilityToggle) {
     adminAvailabilityToggle.checked = available;
@@ -1787,6 +1865,27 @@ function accountImageSource(account) {
     : PROFILE_ICON_PATH;
 }
 
+function maskEmailAddress(email) {
+  const cleanEmail = String(email || "").trim();
+  if (!cleanEmail) {
+    return "";
+  }
+  const atIndex = cleanEmail.indexOf("@");
+  if (atIndex < 0) {
+    return `***${cleanEmail.slice(3)}`;
+  }
+  const local = cleanEmail.slice(0, atIndex);
+  const domain = cleanEmail.slice(atIndex + 1);
+  return `***${local.slice(3)}@${domain}`;
+}
+
+function accountEmailText(account) {
+  const maskedEmail = String(
+    (account && (account.maskedEmail || account.email)) || "",
+  ).trim();
+  return maskedEmail ? maskEmailAddress(maskedEmail) : "";
+}
+
 function adminAccountRateLimitPercent(account) {
   const explicitPercent = Number(account && account.rateLimitPercent);
   if (Number.isFinite(explicitPercent)) {
@@ -1814,9 +1913,10 @@ function renderAdminAccountRow(account, { compact = false } = {}) {
   const name = document.createElement("strong");
   name.textContent = account.username || "Unknown";
   const meta = document.createElement("span");
+  const emailText = accountEmailText(account);
   meta.textContent = compact
-    ? `Seen ${formatDateTime(account.lastSeenAt)}`
-    : `${account.chatCount || 0} chats - ${account.messageCount || 0} messages`;
+    ? `${emailText ? `${emailText} - ` : ""}Seen ${formatDateTime(account.lastSeenAt)}`
+    : `${emailText ? `${emailText} - ` : ""}${account.chatCount || 0} chats - ${account.messageCount || 0} messages`;
   const badges = document.createElement("div");
   badges.className = "admin-badges";
   if (!compact) {
@@ -2004,6 +2104,9 @@ function renderAccountModalDetails() {
   if (accountModalUsername) {
     accountModalUsername.textContent = currentAccount.username;
   }
+  if (accountModalEmail) {
+    accountModalEmail.textContent = accountEmailText(currentAccount) || "No email saved";
+  }
   if (accountModalCreated) {
     accountModalCreated.textContent = formatAccountDate(currentAccount.createdAt);
   }
@@ -2019,23 +2122,29 @@ function renderAccountModalDetails() {
 }
 
 function setAccountModalCopy(view) {
-  if (!accountModalTitle || !accountModalSubtitle) {
+  if (!accountModalTitle) {
     return;
   }
 
   if (view === "create-account") {
     accountModalTitle.textContent = "Create account";
-    accountModalSubtitle.textContent = "Start syncing Learny chats with the account database.";
+    if (accountModalSubtitle) {
+      accountModalSubtitle.textContent = "Create an account to access file uploading, 200 messages per day, up to 10 conversations, and saved chats and messages.";
+    }
     return;
   }
   if (view === "myaccount" && currentAccount) {
     accountModalTitle.textContent = "My account";
-    accountModalSubtitle.textContent = "Settings, sessions, and synced chat memory.";
+    if (accountModalSubtitle) {
+      accountModalSubtitle.textContent = "Your account info and settings.";
+    }
     return;
   }
 
   accountModalTitle.textContent = "Sign in";
-  accountModalSubtitle.textContent = "Connect Learny to your saved chats and settings.";
+  if (accountModalSubtitle) {
+    accountModalSubtitle.textContent = "Sign in to your Learny AI account.";
+  }
 }
 
 function showAccountView(view) {
@@ -2137,9 +2246,7 @@ function clearSignedInLocalState() {
   chats = [];
   activeChatId = "";
   sessionId = "";
-  localStorage.removeItem(ACTIVE_CHAT_KEY);
-  localStorage.removeItem(SESSION_KEY);
-  localStorage.setItem(CHATS_KEY, JSON.stringify(chats));
+  clearStoredChatState();
   updateAccountButton();
   renderChatList();
   renderActiveChat();
@@ -2179,7 +2286,9 @@ function normalizeServerChats(serverChats) {
               createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
             }))
         : [],
-    }));
+    }))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, SIGNED_IN_CHAT_LIMIT);
 }
 
 function queueServerChatSync() {
@@ -2206,7 +2315,7 @@ async function syncChatsToServer() {
       "/api/chats/sync",
       {
         method: "POST",
-        body: JSON.stringify({ chats }),
+        body: JSON.stringify({ chats: sortedChats().slice(0, SIGNED_IN_CHAT_LIMIT) }),
         timeoutMs: STATUS_FETCH_TIMEOUT_MS,
       },
       activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
@@ -2322,7 +2431,11 @@ async function loadAccountAndChats() {
       currentAccountStats = null;
       serverChatsLoaded = false;
       clearAttachmentVerification();
+      trimChatsToAllowedLimit(GUEST_CHAT_LIMIT);
+      clearStoredChatState();
       updateAccountButton();
+      renderChatList();
+      renderActiveChat();
       return accountData;
     }
 
@@ -2359,6 +2472,7 @@ async function loadAccountAndChats() {
       return accountData;
     }
 
+    trimChatsToAllowedLimit(SIGNED_IN_CHAT_LIMIT);
     if (chats.length > 0) {
       queueServerChatSync();
     }
@@ -2368,7 +2482,11 @@ async function loadAccountAndChats() {
     currentAccountStats = null;
     serverChatsLoaded = false;
     clearAttachmentVerification();
+    trimChatsToAllowedLimit(GUEST_CHAT_LIMIT);
+    clearStoredChatState();
     updateAccountButton();
+    renderChatList();
+    renderActiveChat();
     return null;
   }
 }
@@ -2383,6 +2501,29 @@ function getActiveChat() {
 
 function sortedChats() {
   return [...chats].sort((left, right) => right.updatedAt - left.updatedAt);
+}
+
+function allowedChatLimit() {
+  return currentAccount ? SIGNED_IN_CHAT_LIMIT : GUEST_CHAT_LIMIT;
+}
+
+function trimChatsToAllowedLimit(limit = allowedChatLimit()) {
+  const maxChats = Math.max(1, Number.isFinite(limit) ? Math.floor(limit) : GUEST_CHAT_LIMIT);
+  if (chats.length <= maxChats) {
+    return;
+  }
+
+  const keepIds = new Set(
+    sortedChats()
+      .slice(0, maxChats)
+      .map((chat) => chat.id),
+  );
+  chats = chats.filter((chat) => keepIds.has(chat.id));
+  if (!getActiveChat()) {
+    const nextChat = sortedChats()[0] || null;
+    activeChatId = nextChat ? nextChat.id : "";
+    sessionId = nextChat ? nextChat.sessionId : "";
+  }
 }
 
 function chatMatchesSearch(chat, query) {
@@ -2503,6 +2644,9 @@ function createChat() {
   }
   clearChatSearch();
   clearMessageSearch();
+  if (!currentAccount) {
+    chats = [];
+  }
   const chat = {
     id: createId("chat"),
     title: "New chat",
@@ -2514,8 +2658,7 @@ function createChat() {
   chats.unshift(chat);
   activeChatId = chat.id;
   sessionId = chat.sessionId;
-  localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
-  localStorage.setItem(SESSION_KEY, sessionId);
+  trimChatsToAllowedLimit();
   saveChats();
   renderChatList();
   renderActiveChat();
@@ -2530,8 +2673,12 @@ function ensureActiveChat() {
     chat = createChat();
   }
   sessionId = chat.sessionId;
-  localStorage.setItem(ACTIVE_CHAT_KEY, chat.id);
-  localStorage.setItem(SESSION_KEY, sessionId);
+  if (currentAccount) {
+    localStorage.setItem(ACTIVE_CHAT_KEY, chat.id);
+    localStorage.setItem(SESSION_KEY, sessionId);
+  } else {
+    clearStoredChatState();
+  }
   return chat;
 }
 
@@ -2545,8 +2692,12 @@ function openChat(chatId) {
   }
   activeChatId = chat.id;
   sessionId = chat.sessionId;
-  localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
-  localStorage.setItem(SESSION_KEY, sessionId);
+  if (currentAccount) {
+    localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
+    localStorage.setItem(SESSION_KEY, sessionId);
+  } else {
+    clearStoredChatState();
+  }
   clearMessageSearch();
   renderChatList();
   renderActiveChat();
@@ -2564,16 +2715,14 @@ function deleteChat(chatId) {
     sessionId = nextChat ? nextChat.sessionId : "";
   }
 
-  if (activeChatId) {
+  if (currentAccount && activeChatId) {
     localStorage.setItem(ACTIVE_CHAT_KEY, activeChatId);
-  } else {
-    localStorage.removeItem(ACTIVE_CHAT_KEY);
   }
 
-  if (sessionId) {
+  if (currentAccount && sessionId) {
     localStorage.setItem(SESSION_KEY, sessionId);
   } else {
-    localStorage.removeItem(SESSION_KEY);
+    clearStoredChatState();
   }
 
   saveChats();
@@ -2628,7 +2777,11 @@ async function resendEditedUserMessage(messageIndex, text) {
   chat.messages = chat.messages.slice(0, messageIndex);
   chat.sessionId = createId("session");
   sessionId = chat.sessionId;
-  localStorage.setItem(SESSION_KEY, sessionId);
+  if (currentAccount) {
+    localStorage.setItem(SESSION_KEY, sessionId);
+  } else {
+    clearStoredChatState();
+  }
 
   chat.updatedAt = Date.now();
   refreshChatTitle(chat);
@@ -3024,6 +3177,11 @@ function resetChat() {
     return;
   }
 
+  if (!currentAccount && chats.length >= GUEST_CHAT_LIMIT) {
+    openGuestAccessPopup("chatLimit");
+    return;
+  }
+
   createChat();
   messageInput.value = "";
   messageInput.disabled = false;
@@ -3309,7 +3467,11 @@ async function askLearny(message, { addUserMessage = true, attachments = [] } = 
 
         sessionId = data.sessionId;
         chat.sessionId = data.sessionId;
-        localStorage.setItem(SESSION_KEY, sessionId);
+        if (currentAccount) {
+          localStorage.setItem(SESSION_KEY, sessionId);
+        } else {
+          clearStoredChatState();
+        }
         if (data.rateSessionId) {
           rateLimitSessionId = data.rateSessionId;
           localStorage.setItem(RATE_LIMIT_SESSION_KEY, rateLimitSessionId);
@@ -3380,8 +3542,10 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint, captchaName)
 
   const formData = new FormData(form);
   const username = String(formData.get("username") || "").trim();
+  const email = String(formData.get("email") || "").trim();
   const password = String(formData.get("password") || "");
-  if (!username || !password) {
+  const requiresEmail = captchaName === "createAccount";
+  if (!username || !password || (requiresEmail && !email)) {
     setAccountFormMessage(messageNode, GENERIC_ERROR_MESSAGE, true);
     return;
   }
@@ -3398,7 +3562,12 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint, captchaName)
       endpoint,
       {
         method: "POST",
-        body: JSON.stringify({ username, password, ...captchaPayload(captchaName) }),
+        body: JSON.stringify({
+          username,
+          password,
+          ...(email ? { email } : {}),
+          ...captchaPayload(captchaName),
+        }),
         timeoutMs: STATUS_FETCH_TIMEOUT_MS,
       },
       activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
@@ -3593,7 +3762,7 @@ chatForm.addEventListener("submit", (event) => {
   }
   if (!currentAccount && selectedAttachments.length > 0) {
     clearSelectedAttachments();
-    openAccountModal("sign-in");
+    openGuestAccessPopup("attachments");
     return;
   }
   if (selectedAttachments.length > 0 && !attachmentVerificationIsValid()) {
@@ -3613,7 +3782,7 @@ if (attachButton && fileInput) {
     }
     if (!currentAccount) {
       clearSelectedAttachments();
-      openAccountModal("sign-in");
+      openGuestAccessPopup("attachments");
       return;
     }
     openVerifiedFilePicker();
@@ -3622,8 +3791,9 @@ if (attachButton && fileInput) {
   fileInput.addEventListener("change", (event) => {
     const files = event.target.files ? Array.from(event.target.files) : [];
     if (!currentAccount) {
+      event.target.value = "";
       clearSelectedAttachments();
-      openAccountModal("sign-in");
+      openGuestAccessPopup("attachments");
       return;
     }
     if (!attachmentVerificationIsValid()) {
@@ -3736,6 +3906,26 @@ if (rateLimitClose) {
 
 if (rateLimitOk) {
   rateLimitOk.addEventListener("click", closeRateLimitPopup);
+}
+
+if (guestAccessBackdrop) {
+  guestAccessBackdrop.addEventListener("click", closeGuestAccessPopup);
+}
+
+if (guestAccessClose) {
+  guestAccessClose.addEventListener("click", closeGuestAccessPopup);
+}
+
+if (guestAccessDismiss) {
+  guestAccessDismiss.addEventListener("click", closeGuestAccessPopup);
+}
+
+if (guestAccessCreate) {
+  guestAccessCreate.addEventListener("click", () => openAccountFromGuestAccess("create-account"));
+}
+
+if (guestAccessSignIn) {
+  guestAccessSignIn.addEventListener("click", () => openAccountFromGuestAccess("sign-in"));
 }
 
 if (attachmentAuthBackdrop) {
@@ -3857,6 +4047,10 @@ document.addEventListener("keydown", (event) => {
       closeRateLimitPopup();
       return;
     }
+    if (guestAccessModal && !guestAccessModal.hidden) {
+      closeGuestAccessPopup();
+      return;
+    }
     if (accountModal && !accountModal.hidden) {
       closeAccountModal();
       return;
@@ -3875,11 +4069,14 @@ if (!getActiveChat() && chats.length > 0) {
 const activeChat = getActiveChat();
 if (activeChat) {
   sessionId = activeChat.sessionId;
-  localStorage.setItem(ACTIVE_CHAT_KEY, activeChat.id);
-  localStorage.setItem(SESSION_KEY, activeChat.sessionId);
+  if (currentAccount) {
+    localStorage.setItem(ACTIVE_CHAT_KEY, activeChat.id);
+    localStorage.setItem(SESSION_KEY, activeChat.sessionId);
+  } else {
+    clearStoredChatState();
+  }
 } else {
-  localStorage.removeItem(ACTIVE_CHAT_KEY);
-  localStorage.removeItem(SESSION_KEY);
+  clearStoredChatState();
 }
 
 renderChatList();

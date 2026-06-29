@@ -402,6 +402,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             try:
                 body = self._read_json_body()
                 username = _required_string(body, "username")
+                email = _required_string(body, "email")
                 password = _required_string(body, "password")
                 if not self._verify_captcha_from_body(body):
                     self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
@@ -410,7 +411,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 if ban:
                     self._send_ban_response(ban)
                     return
-                account = database.create_account(username, password)
+                account = database.create_account(username, password, email)
                 token = database.create_session(int(account["id"]))
             except (ValueError, AccountError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.BAD_REQUEST)
@@ -431,6 +432,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             try:
                 body = self._read_json_body()
                 username = _required_string(body, "username")
+                email = _optional_string(body, "email")
                 password = _required_string(body, "password")
                 if not self._verify_captcha_from_body(body):
                     self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.FORBIDDEN)
@@ -439,7 +441,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 if ban:
                     self._send_ban_response(ban)
                     return
-                account = database.authenticate(username, password)
+                account = database.authenticate(username, password, email)
                 token = database.create_session(int(account["id"]))
             except (ValueError, AccountError, AuthenticationError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
@@ -1620,12 +1622,15 @@ def _clean_session_id(session_id: str | None) -> str | None:
 
 def _public_account(account: dict[str, Any]) -> dict[str, Any]:
     profile_picture = account.get("profilePicture", account.get("profile_picture"))
+    masked_email = _mask_email(account.get("email", account.get("email_address", "")))
     is_admin = _is_admin_account(account)
     attachments_verified_at = int(
         account.get("attachmentsVerifiedAt", account.get("attachments_verified_at", 0)) or 0
     )
     return {
         "username": str(account["username"]),
+        "email": masked_email,
+        "maskedEmail": masked_email,
         "profilePicture": str(profile_picture) if profile_picture else None,
         "createdAt": int(account["createdAt"]),
         "lastSeenAt": int(account["lastSeenAt"]),
@@ -1730,8 +1735,11 @@ def _public_admin_account(
     rate_limit: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     public_rate_limit = _public_rate_limit(rate_limit) if rate_limit else None
+    masked_email = _mask_email(account.get("email", ""))
     return {
         "username": str(account["username"]),
+        "email": masked_email,
+        "maskedEmail": masked_email,
         "profilePicture": account.get("profilePicture"),
         "createdAt": int(account["createdAt"]),
         "lastSeenAt": int(account["lastSeenAt"]),
@@ -1742,6 +1750,16 @@ def _public_admin_account(
         "rateLimit": public_rate_limit,
         "rateLimitPercent": _rate_limit_percent(public_rate_limit),
     }
+
+
+def _mask_email(email: Any) -> str:
+    clean_email = str(email or "").strip()
+    if not clean_email:
+        return ""
+    local, separator, domain = clean_email.partition("@")
+    if not separator:
+        return f"***{clean_email[3:]}"
+    return f"***{local[3:]}@{domain}"
 
 
 def _admin_portal_payload(
