@@ -1900,7 +1900,7 @@ input:focus-visible {
 .chat-item {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px;
+  grid-template-columns: minmax(0, 1fr) 26px 26px;
   align-items: center;
   gap: 4px;
   width: 100%;
@@ -1977,6 +1977,7 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+.rename-chat-button,
 .delete-chat-button {
   display: grid;
   place-items: center;
@@ -1992,15 +1993,62 @@ input:focus-visible {
   transition: opacity 150ms ease, transform 150ms ease, background 150ms ease, color 150ms ease;
 }
 
+.rename-chat-button img {
+  width: 13px;
+  height: 13px;
+  filter: brightness(0) invert(1);
+  opacity: 0.72;
+}
+
 .chat-item:hover .delete-chat-button,
+.chat-item:hover .rename-chat-button,
+.chat-item.renaming .delete-chat-button,
+.chat-item.renaming .rename-chat-button,
+.rename-chat-button:focus-visible,
 .delete-chat-button:focus-visible {
   opacity: 1;
   transform: translateX(0);
 }
 
+.rename-chat-button:hover {
+  background: rgba(126, 156, 255, 0.14);
+  color: #dfe6ff;
+}
+
 .delete-chat-button:hover {
   background: rgba(255, 107, 107, 0.12);
   color: #ff8f8f;
+}
+
+.chat-rename-form {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.chat-rename-input {
+  width: 100%;
+  height: 30px;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 9px;
+  outline: 0;
+  padding: 0 9px;
+  background: rgba(0, 0, 0, 0.28);
+  color: #fff;
+  font: inherit;
+  font-size: 0.79rem;
+  font-weight: 650;
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.08),
+    0 0 0 3px rgba(88, 101, 255, 0.12);
+}
+
+.chat-rename-input:focus {
+  border-color: rgba(170, 188, 255, 0.72);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.1),
+    0 0 0 3px rgba(88, 101, 255, 0.18);
 }
 
 .empty-chat-list {

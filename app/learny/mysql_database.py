@@ -15,6 +15,7 @@ from .database import (
     DEFAULT_ADMIN_USERNAME,
     DEFAULT_RATE_LIMIT_TIME_ZONE,
     MAX_ACCOUNT_CHATS,
+    MAX_CHAT_MESSAGES,
     PLATFORM_AVAILABLE_KEY,
     RATE_LIMIT_LIMIT,
     RATE_LIMIT_WINDOW_MS,
@@ -868,6 +869,8 @@ class MySQLLearnyDatabase:
                     (account_id, MAX_ACCOUNT_CHATS),
                 )
                 chat_rows = cursor.fetchall()
+                for row in chat_rows:
+                    _mysql_prune_extra_messages(cursor, account_id, str(row["id"]))
                 cursor.execute(
                     """
                     SELECT chat_id, speaker, text, source, thought_seconds, created_at
@@ -965,6 +968,7 @@ class MySQLLearnyDatabase:
                                 for message in messages
                             ],
                         )
+                    _mysql_prune_extra_messages(cursor, account_id, chat["id"])
                 _mysql_prune_extra_chats(cursor, account_id)
 
         return self.list_chats(account_id)
@@ -1049,6 +1053,7 @@ class MySQLLearnyDatabase:
                     "UPDATE chats SET updated_at = %s WHERE id = %s AND account_id = %s",
                     (_now_ms(), clean_chat_id, account_id),
                 )
+                _mysql_prune_extra_messages(cursor, account_id, clean_chat_id)
 
     def history_for_chat(self, account_id: int, chat_id: str, max_turns: int = 8) -> ConversationHistory:
         clean_chat_id = _clean_identifier(chat_id, "chat")
@@ -1100,6 +1105,28 @@ def _mysql_prune_extra_chats(cursor: Any, account_id: int) -> None:
           )
         """,
         (account_id, account_id, MAX_ACCOUNT_CHATS),
+    )
+
+
+def _mysql_prune_extra_messages(cursor: Any, account_id: int, chat_id: str) -> None:
+    cursor.execute(
+        """
+        DELETE FROM messages
+        WHERE account_id = %s
+          AND chat_id = %s
+          AND id NOT IN (
+            SELECT id
+            FROM (
+              SELECT id
+              FROM messages
+              WHERE account_id = %s
+                AND chat_id = %s
+              ORDER BY id DESC
+              LIMIT %s
+            ) AS kept_messages
+          )
+        """,
+        (account_id, chat_id, account_id, chat_id, MAX_CHAT_MESSAGES),
     )
 
 

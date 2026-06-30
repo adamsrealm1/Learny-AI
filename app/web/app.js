@@ -132,6 +132,7 @@ const ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024;
 const ATTACHMENT_LIMIT = 5;
 const GUEST_CHAT_LIMIT = 1;
 const SIGNED_IN_CHAT_LIMIT = 10;
+const MAX_CHAT_MESSAGES = 200;
 const ATTACHMENT_EXTENSIONS = new Set(["txt", "md", "log", "docx", "rtf", "pdf", "csv", "json", "xml"]);
 const RECAPTCHA_SCRIPT_ID = "learny-recaptcha-script";
 const COPY_RESET_DELAY_MS = 10000;
@@ -266,6 +267,7 @@ let isSending = false;
 let chatSearchQuery = "";
 let messageSearchQuery = "";
 let messageSearchIndex = 0;
+let renamingChatId = "";
 let activeApiBase = "";
 let currentAccount = null;
 let currentAccountStats = null;
@@ -913,31 +915,67 @@ function loadStoredChats() {
             : createId("session"),
         createdAt: Number.isFinite(chat.createdAt) ? chat.createdAt : Date.now(),
         updatedAt: Number.isFinite(chat.updatedAt) ? chat.updatedAt : Date.now(),
-        messages: Array.isArray(chat.messages)
-          ? chat.messages
-              .filter(
-                (message) =>
-                  message &&
-                  typeof message === "object" &&
-                  typeof message.speaker === "string" &&
-                  typeof message.text === "string",
-              )
-              .map((message) => ({
-                speaker: message.speaker,
-                text: sanitizeStoredMessageText(message),
-                source: sanitizeStoredMessageSource(message),
-                attachments: normalizeAttachmentMetas(message),
-                thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
-                createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
-              }))
-          : [],
+        messages: normalizeStoredMessages(chat.messages),
       }));
   } catch (error) {
     return [];
   }
 }
 
+function normalizeStoredMessages(messages) {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return messages
+    .filter(
+      (message) =>
+        message &&
+        typeof message === "object" &&
+        typeof message.speaker === "string" &&
+        typeof message.text === "string",
+    )
+    .map((message) => ({
+      speaker: message.speaker,
+      text: sanitizeStoredMessageText(message),
+      source: sanitizeStoredMessageSource(message),
+      attachments: normalizeAttachmentMetas(message),
+      thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
+      createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
+    }))
+    .slice(-MAX_CHAT_MESSAGES);
+}
+
+function trimChatMessagesToLimit(chat) {
+  if (!chat || !Array.isArray(chat.messages)) {
+    return 0;
+  }
+  const extraCount = chat.messages.length - MAX_CHAT_MESSAGES;
+  if (extraCount <= 0) {
+    return 0;
+  }
+  chat.messages = chat.messages.slice(extraCount);
+  return extraCount;
+}
+
+function trimAllChatMessagesToLimit() {
+  chats.forEach(trimChatMessagesToLimit);
+}
+
+function trimRenderedMessagesAfterPrune(prunedCount) {
+  if (!Number.isInteger(prunedCount) || prunedCount <= 0) {
+    return;
+  }
+  const renderedMessages = [...chatLog.querySelectorAll(".message:not(.typing)")];
+  renderedMessages.slice(0, prunedCount).forEach((node) => node.remove());
+  [...chatLog.querySelectorAll(".message:not(.typing)")].forEach((node, index) => {
+    node.dataset.messageIndex = String(index);
+  });
+  updateMessageSearch();
+}
+
 function saveChats() {
+  trimAllChatMessagesToLimit();
   trimChatsToAllowedLimit();
   if (!currentAccount) {
     clearStoredChatState();
@@ -2294,24 +2332,7 @@ function normalizeServerChats(serverChats) {
           : createId("session"),
       createdAt: Number.isFinite(chat.createdAt) ? chat.createdAt : Date.now(),
       updatedAt: Number.isFinite(chat.updatedAt) ? chat.updatedAt : Date.now(),
-      messages: Array.isArray(chat.messages)
-        ? chat.messages
-            .filter(
-              (message) =>
-                message &&
-                typeof message === "object" &&
-                typeof message.speaker === "string" &&
-                typeof message.text === "string",
-            )
-            .map((message) => ({
-              speaker: message.speaker,
-              text: sanitizeStoredMessageText(message),
-              source: sanitizeStoredMessageSource(message),
-              attachments: normalizeAttachmentMetas(message),
-              thoughtSeconds: normalizeThoughtSeconds(message.thoughtSeconds),
-              createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
-            }))
-        : [],
+      messages: normalizeStoredMessages(chat.messages),
     }))
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, SIGNED_IN_CHAT_LIMIT);
@@ -2713,6 +2734,7 @@ function openChat(chatId) {
   if (!chat) {
     return;
   }
+  renamingChatId = "";
   if (activeView !== "chat") {
     setMainView("chat");
   }
@@ -2731,8 +2753,56 @@ function openChat(chatId) {
   messageInput.focus();
 }
 
+function renameChat(chatId, nextTitle) {
+  const chat = getChatById(chatId);
+  if (!chat) {
+    return false;
+  }
+
+  const cleanTitle = String(nextTitle || "").trim().replace(/\s+/g, " ").slice(0, 80);
+  if (!cleanTitle) {
+    return false;
+  }
+
+  chat.title = cleanTitle;
+  chat.updatedAt = Date.now();
+  renamingChatId = "";
+  saveChats();
+  renderChatList();
+  return true;
+}
+
+function startChatRename(chatId) {
+  const chat = getChatById(chatId);
+  if (!chat) {
+    return;
+  }
+
+  renamingChatId = chatId;
+  renderChatList();
+  window.setTimeout(() => {
+    const input = [...chatList.querySelectorAll(".chat-rename-input")]
+      .find((candidate) => candidate.dataset.chatId === chatId);
+    if (input instanceof HTMLInputElement) {
+      input.focus();
+      input.select();
+    }
+  }, 40);
+}
+
+function cancelChatRename() {
+  if (!renamingChatId) {
+    return;
+  }
+  renamingChatId = "";
+  renderChatList();
+}
+
 function deleteChat(chatId) {
   const deletingActiveChat = chatId === activeChatId;
+  if (renamingChatId === chatId) {
+    renamingChatId = "";
+  }
   chats = chats.filter((chat) => chat.id !== chatId);
 
   if (deletingActiveChat) {
@@ -3084,6 +3154,7 @@ function saveMessage(message) {
     createdAt: Number.isFinite(message.createdAt) ? message.createdAt : Date.now(),
   };
   chat.messages.push(savedMessage);
+  const prunedCount = trimChatMessagesToLimit(chat);
   const messageIndex = chat.messages.length - 1;
   chat.updatedAt = Date.now();
 
@@ -3093,12 +3164,13 @@ function saveMessage(message) {
 
   saveChats();
   renderChatList();
-  return messageIndex;
+  return { messageIndex, prunedCount };
 }
 
 function addMessage(message, { persist = true, animateWords = false } = {}) {
   if (persist) {
-    const messageIndex = saveMessage(message);
+    const { messageIndex, prunedCount } = saveMessage(message);
+    trimRenderedMessagesAfterPrune(prunedCount);
     return displayMessage(message, { animateWords, messageIndex });
   }
   return displayMessage(message, { animateWords });
@@ -3145,6 +3217,10 @@ function renderChatList() {
     if (chat.id === activeChatId) {
       item.classList.add("active");
     }
+    const isRenaming = chat.id === renamingChatId;
+    if (isRenaming) {
+      item.classList.add("renaming");
+    }
 
     const openButton = document.createElement("button");
     openButton.className = "chat-open-button";
@@ -3159,6 +3235,19 @@ function renderChatList() {
     meta.className = "chat-meta";
     meta.textContent = formatChatMeta(chat);
 
+    const renameButton = document.createElement("button");
+    renameButton.className = "rename-chat-button";
+    renameButton.type = "button";
+    renameButton.title = "Rename chat";
+    renameButton.setAttribute("aria-label", `Rename ${chat.title}`);
+
+    const renameIcon = document.createElement("img");
+    renameIcon.className = "ui-icon";
+    renameIcon.src = EDIT_ICON_PATH;
+    renameIcon.alt = "";
+    renameIcon.setAttribute("aria-hidden", "true");
+    renameButton.append(renameIcon);
+
     const deleteButton = document.createElement("button");
     deleteButton.className = "delete-chat-button";
     deleteButton.type = "button";
@@ -3172,11 +3261,46 @@ function renderChatList() {
     deleteIcon.setAttribute("aria-hidden", "true");
     deleteButton.append(deleteIcon);
 
-    openButton.append(title, meta);
-    item.append(openButton, deleteButton);
+    if (isRenaming) {
+      const renameForm = document.createElement("form");
+      renameForm.className = "chat-rename-form";
+
+      const renameInput = document.createElement("input");
+      renameInput.className = "chat-rename-input";
+      renameInput.type = "text";
+      renameInput.value = chat.title;
+      renameInput.maxLength = 80;
+      renameInput.autocomplete = "off";
+      renameInput.spellcheck = false;
+      renameInput.dataset.chatId = chat.id;
+      renameInput.setAttribute("aria-label", "Rename chat");
+
+      renameForm.append(renameInput);
+      item.append(renameForm, renameButton, deleteButton);
+
+      renameForm.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!renameChat(chat.id, renameInput.value)) {
+          renameInput.focus();
+        }
+      });
+      renameInput.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          cancelChatRename();
+        }
+      });
+    } else {
+      openButton.append(title, meta);
+      item.append(openButton, renameButton, deleteButton);
+      openButton.addEventListener("click", () => openChat(chat.id));
+    }
     chatList.append(item);
 
-    openButton.addEventListener("click", () => openChat(chat.id));
+    renameButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      startChatRename(chat.id);
+    });
     deleteButton.addEventListener("click", (event) => {
       event.stopPropagation();
       deleteChat(chat.id);

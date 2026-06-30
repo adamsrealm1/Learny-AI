@@ -24,6 +24,7 @@ RATE_LIMIT_WINDOW_MS = 86_400_000
 DEFAULT_RATE_LIMIT_TIME_ZONE = "UTC"
 DEFAULT_ADMIN_USERNAME = "adamsrealm1"
 MAX_ACCOUNT_CHATS = 10
+MAX_CHAT_MESSAGES = 200
 PLATFORM_AVAILABLE_KEY = "learny_available"
 
 
@@ -789,6 +790,8 @@ class LearnyDatabase:
                 """,
                 (account_id, MAX_ACCOUNT_CHATS),
             ).fetchall()
+            for row in chat_rows:
+                _prune_extra_messages(connection, account_id, str(row["id"]))
             message_rows = connection.execute(
                 """
                 SELECT messages.chat_id, messages.speaker, messages.text, messages.source,
@@ -883,6 +886,7 @@ class LearnyDatabase:
                         for message in messages
                     ],
                 )
+                _prune_extra_messages(connection, account_id, chat["id"])
             _prune_extra_chats(connection, account_id)
 
         return self.list_chats(account_id)
@@ -965,6 +969,7 @@ class LearnyDatabase:
                 "UPDATE chats SET updated_at = ? WHERE id = ? AND account_id = ?",
                 (_now_ms(), clean_chat_id, account_id),
             )
+            _prune_extra_messages(connection, account_id, clean_chat_id)
 
     def history_for_chat(self, account_id: int, chat_id: str, max_turns: int = 8) -> ConversationHistory:
         clean_chat_id = _clean_identifier(chat_id, "chat")
@@ -1156,7 +1161,7 @@ def _clean_chat_payload(chat: dict[str, Any]) -> dict[str, Any]:
         "sessionId": _clean_identifier(str(chat.get("sessionId", "")), "session"),
         "createdAt": _clean_timestamp(chat.get("createdAt"), now),
         "updatedAt": _clean_timestamp(chat.get("updatedAt"), now),
-        "messages": [_clean_message_payload(message) for message in messages[:1000]],
+        "messages": [_clean_message_payload(message) for message in messages[-MAX_CHAT_MESSAGES:]],
     }
 
 
@@ -1178,6 +1183,25 @@ def _prune_extra_chats(connection: sqlite3.Connection, account_id: int) -> None:
           )
         """,
         (account_id, account_id, MAX_ACCOUNT_CHATS),
+    )
+
+
+def _prune_extra_messages(connection: sqlite3.Connection, account_id: int, chat_id: str) -> None:
+    connection.execute(
+        """
+        DELETE FROM messages
+        WHERE account_id = ?
+          AND chat_id = ?
+          AND id NOT IN (
+            SELECT id
+            FROM messages
+            WHERE account_id = ?
+              AND chat_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+          )
+        """,
+        (account_id, chat_id, account_id, chat_id, MAX_CHAT_MESSAGES),
     )
 
 

@@ -588,7 +588,40 @@ class AccountWebTests(unittest.TestCase):
         self.assertTrue(blocked["data"]["rateLimit"]["limited"])
         self.assertGreaterEqual(int(blocked["headers"].get("Retry-After", "0")), 1)
         self.assertEqual(CountingAnswerGenerator.calls, 200)
-        self.assertEqual(len(chats["chats"][0]["messages"]), 400)
+        self.assertEqual(len(chats["chats"][0]["messages"]), 200)
+        self.assertEqual(chats["chats"][0]["messages"][0]["text"], "hello 100")
+
+    def test_saved_chat_sync_permanently_keeps_only_newest_200_messages(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {"username": "message_cap_user", "password": "strong-password"},
+            )
+            synced = server.post_json(
+                "/api/chats/sync",
+                {
+                    "chats": [
+                        {
+                            "id": "capped-chat",
+                            "title": "Message cap",
+                            "sessionId": "message-cap-session",
+                            "createdAt": 1,
+                            "updatedAt": 2,
+                            "messages": [
+                                {"speaker": "You", "text": f"message {index}", "createdAt": index}
+                                for index in range(205)
+                            ],
+                        }
+                    ]
+                },
+            )
+            chats = server.get_json("/api/chats")
+
+        self.assertEqual(len(synced["chats"][0]["messages"]), 200)
+        self.assertEqual(len(chats["chats"][0]["messages"]), 200)
+        self.assertEqual(chats["chats"][0]["messages"][0]["text"], "message 5")
+        self.assertEqual(chats["chats"][0]["messages"][-1]["text"], "message 204")
+        self.assertEqual(synced["stats"]["messages"], 200)
 
     def test_signed_out_rate_limit_blocks_31st_guest_ask_for_same_browser(self) -> None:
         CountingAnswerGenerator.calls = 0
