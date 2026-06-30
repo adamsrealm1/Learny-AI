@@ -1282,14 +1282,14 @@ function closeRateLimitPopup() {
 
 const GUEST_ACCESS_COPY = {
   chatLimit: {
-    title: "You can't use this function right now.",
+    title: "You are limited to one conversation right now.",
     description:
       "Users who are not signed in can only keep one conversation open, and the conversation along with its messages are deleted. Create a free account to keep up to 10 saved conversations with their messages.",
   },
   attachments: {
     title: "You can't upload a file right now.",
     description:
-      "You'll need to create a free account to upload files. This is done to prevent spam, bots, and to keep Learny AI safe for everyone.",
+      "A free account is required for you to upload files. This is done to prevent spam, bots, and to keep Learny AI safe for everyone.",
   },
 };
 
