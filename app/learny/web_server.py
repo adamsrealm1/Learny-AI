@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
-import hashlib
 import html
 import io
 import json
@@ -394,7 +393,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 _admin_portal_payload(
                     database,
-                    self._locked_rate_limit_time_zone(admin),
+                    self._rate_limit_time_zone(),
                 )
             )
 
@@ -443,7 +442,13 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     return
                 account = database.authenticate(username, password, email)
                 token = database.create_session(int(account["id"]))
-            except (ValueError, AccountError, AuthenticationError):
+            except AuthenticationError as error:
+                self._send_json(
+                    {"error": str(error), "authErrorFields": list(error.fields)},
+                    HTTPStatus.UNAUTHORIZED,
+                )
+                return
+            except (ValueError, AccountError):
                 self._send_json({"error": GENERIC_ERROR_MESSAGE}, HTTPStatus.UNAUTHORIZED)
                 return
 
@@ -556,7 +561,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
 
             deleted = database.clear_rate_limits()
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            time_zone = self._locked_rate_limit_time_zone(account)
+            time_zone = self._rate_limit_time_zone()
             rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
@@ -580,7 +585,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self._send_ban_response(ban)
                 return
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            time_zone = self._locked_rate_limit_time_zone(account)
+            time_zone = self._rate_limit_time_zone()
             rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
@@ -609,7 +614,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 _admin_portal_payload(
                     database,
-                    self._locked_rate_limit_time_zone(admin),
+                    self._rate_limit_time_zone(),
                 )
             )
 
@@ -623,11 +628,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 target_account = _account_by_username(database, username)
                 if target_account is None:
                     raise AccountError("Account could not be found.")
-                admin_time_zone = self._locked_rate_limit_time_zone(admin)
-                time_zone = database.rate_limit_time_zone(
-                    _time_zone_lock_key(target_account, ""),
-                    admin_time_zone,
-                )
+                time_zone = self._rate_limit_time_zone()
                 rate_limit_identity, rate_limit_size = _rate_limit_policy(target_account)
                 deleted = database.clear_rate_limit(rate_limit_identity)
                 rate_limit = database.peek_rate_limit(
@@ -666,7 +667,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 _admin_portal_payload(
                     database,
-                    self._locked_rate_limit_time_zone(admin),
+                    self._rate_limit_time_zone(),
                 )
             )
 
@@ -686,7 +687,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self._send_json(
                 _admin_portal_payload(
                     database,
-                    self._locked_rate_limit_time_zone(admin),
+                    self._rate_limit_time_zone(),
                 )
             )
 
@@ -704,7 +705,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 {
                     **_admin_portal_payload(
                         database,
-                        self._locked_rate_limit_time_zone(admin),
+                        self._rate_limit_time_zone(),
                     ),
                     "deleted": deleted,
                 }
@@ -730,7 +731,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 {
                     **_admin_portal_payload(
                         database,
-                        self._locked_rate_limit_time_zone(admin),
+                        self._rate_limit_time_zone(),
                     ),
                     "updatedAccount": _public_account(updated),
                 }
@@ -822,7 +823,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             )
             session_id, session_history = session_store.get(requested_session_id)
             rate_session_id = _rate_session_id(self.headers.get("X-Learny-Rate-Session"))
-            time_zone = self._locked_rate_limit_time_zone(account)
+            time_zone = self._rate_limit_time_zone()
             rate_limit_identity, rate_limit_size = _rate_limit_policy(account, rate_session_id)
             rate_limit = database.peek_rate_limit(
                 rate_limit_identity,
@@ -993,11 +994,8 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
         def _verify_captcha_from_body(self, body: dict[str, Any]) -> bool:
             return captcha.verify(_optional_string(body, "captchaToken"), self._client_ip())
 
-        def _locked_rate_limit_time_zone(self, account: dict[str, Any] | None) -> str:
-            return database.locked_rate_limit_time_zone(
-                _time_zone_lock_key(account, self._client_ip()),
-                _request_time_zone(self.headers.get("X-Learny-Time-Zone")),
-            )
+        def _rate_limit_time_zone(self) -> str:
+            return _request_time_zone(self.headers.get("X-Learny-Time-Zone"))
 
         def _client_ip(self) -> str:
             forwarded_for = self.headers.get("X-Forwarded-For", "")
@@ -1649,13 +1647,6 @@ def _request_time_zone(value: str | None) -> str:
     return time_zone[:80] if time_zone else DEFAULT_RATE_LIMIT_TIME_ZONE
 
 
-def _time_zone_lock_key(account: dict[str, Any] | None, client_ip: str) -> str:
-    if account is not None:
-        return f"account:{int(account['id'])}"
-    ip_digest = hashlib.sha256(str(client_ip or "unknown").encode("utf-8")).hexdigest()
-    return f"guest-ip:{ip_digest}"
-
-
 def _rate_limit_policy(account: dict[str, Any] | None, rate_session_id: str = "") -> tuple[str, int]:
     if account is None:
         return f"session:{_rate_session_id(rate_session_id)}", GUEST_RATE_LIMIT_LIMIT
@@ -1776,15 +1767,11 @@ def _admin_portal_payload(
     for account in raw_accounts:
         identity_key, limit = _rate_limit_policy(account)
         if identity_key not in rate_limits:
-            account_time_zone = database.rate_limit_time_zone(
-                _time_zone_lock_key(account, ""),
-                time_zone,
-            )
             rate_limits[identity_key] = database.peek_rate_limit(
                 identity_key,
                 limit=limit,
                 window_ms=RATE_LIMIT_WINDOW_MS,
-                time_zone=account_time_zone,
+                time_zone=time_zone,
             )
     accounts = [
         _public_admin_account(

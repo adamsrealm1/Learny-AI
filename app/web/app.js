@@ -143,6 +143,7 @@ const STATUS_FETCH_TIMEOUT_MS = 8000;
 const ASK_RETRY_BASE_DELAY_MS = 1200;
 const ASK_RETRY_MAX_DELAY_MS = 3500;
 const ASK_REQUEST_TIMEOUT_MS = 10000;
+const RATE_LIMIT_REFRESH_MS = 5000;
 const DEFAULT_RATE_LIMIT = {
   limit: 30,
   remaining: 30,
@@ -1196,16 +1197,11 @@ function renderRateLimit() {
     window.clearTimeout(rateLimitRefreshTimerId);
     rateLimitRefreshTimerId = null;
   }
-  if (Date.now() < rateLimit.resetAt) {
-    const nextTickMs = limited || rateLimitSecondsLeft(rateLimit) < 3600 ? 1000 : 60000;
+  if (!DIRECT_FILE_MODE) {
     rateLimitRefreshTimerId = window.setTimeout(() => {
       rateLimitRefreshTimerId = null;
-      if (Date.now() >= rateLimit.resetAt) {
-        loadRateLimit();
-        return;
-      }
-      renderRateLimit();
-    }, nextTickMs);
+      loadRateLimit();
+    }, RATE_LIMIT_REFRESH_MS);
   }
 
   syncComposerAvailability();
@@ -1249,7 +1245,7 @@ function renderRateLimitPopup() {
         return;
       }
       renderRateLimitPopup();
-    }, 1000);
+    }, RATE_LIMIT_REFRESH_MS);
   }
 }
 
@@ -1286,14 +1282,14 @@ function closeRateLimitPopup() {
 
 const GUEST_ACCESS_COPY = {
   chatLimit: {
-    title: "Guest chats are temporary",
+    title: "You can't use this function right now.",
     description:
-      "Guests can keep one conversation open at a time, and it resets when the page refreshes. Create a free account to keep up to 10 saved conversations with their messages.",
+      "Users who are not signed in can only keep one conversation open, and the conversation along with its messages are deleted. Create a free account to keep up to 10 saved conversations with their messages.",
   },
   attachments: {
-    title: "File uploads need an account",
+    title: "You can't upload a file right now.",
     description:
-      "Files can include private information, so Learny only accepts uploads from signed-in accounts. Create a free account or sign in, then you can attach up to 10 files.",
+      "You'll need to create a free account to upload files. This is done to prevent spam, bots, and to keep Learny AI safe for everyone.",
   },
 };
 
@@ -3583,7 +3579,14 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint, captchaName)
     await loadRateLimit();
     openAccountModal("myaccount");
   } catch (error) {
-    setAccountFormMessage(messageNode, GENERIC_ERROR_MESSAGE, true);
+    const message =
+      error &&
+      error.data &&
+      typeof error.data.error === "string" &&
+      error.data.error.trim()
+        ? error.data.error.trim()
+        : GENERIC_ERROR_MESSAGE;
+    setAccountFormMessage(messageNode, message, true);
   } finally {
     setAuthFormBusy(form, false);
     resetCaptchaControl(captchaName);

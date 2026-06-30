@@ -90,20 +90,6 @@ class WasmerStorageTests(unittest.TestCase):
         self.assertEqual(reset_at, expected_reset_at)
         self.assertEqual(window_ms, 82_800_000)
 
-    def test_rate_limit_time_zone_locks_first_value(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            database = LearnyDatabase(Path(temp_dir) / "learny.sqlite3")
-
-            first = database.locked_rate_limit_time_zone("account:1", "Australia/Sydney")
-            changed = database.locked_rate_limit_time_zone("account:1", "America/Los_Angeles")
-            peeked = database.rate_limit_time_zone("account:1", "UTC")
-            unlocked = database.rate_limit_time_zone("account:2", "America/Los_Angeles")
-
-        self.assertEqual(first, "Australia/Sydney")
-        self.assertEqual(changed, "Australia/Sydney")
-        self.assertEqual(peeked, "Australia/Sydney")
-        self.assertEqual(unlocked, "America/Los_Angeles")
-
     def test_rate_limit_local_reset_keeps_only_current_identity_window_events(self) -> None:
         now = 1_781_625_600_000
         window_start, reset_at, _window_ms = _rate_limit_window(now, "Australia/Sydney")

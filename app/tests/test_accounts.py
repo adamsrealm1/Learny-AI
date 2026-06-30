@@ -169,9 +169,67 @@ class AccountWebTests(unittest.TestCase):
         self.assertTrue(created["authenticated"])
         self.assertEqual(created["account"]["email"], "***son@example.com")
         self.assertEqual(wrong_email["status"], 401)
+        self.assertEqual(wrong_email["data"]["error"], "Incorrect email")
         self.assertTrue(signed_in_without_email["authenticated"])
         self.assertTrue(signed_in_with_email["authenticated"])
         self.assertEqual(signed_in_with_email["account"]["email"], "***son@example.com")
+
+    def test_sign_in_reports_incorrect_auth_fields(self) -> None:
+        with run_account_server() as server:
+            server.post_json(
+                "/api/accounts/create",
+                {
+                    "username": "auth_field_user",
+                    "email": "person@example.com",
+                    "password": "strong-password",
+                },
+            )
+            server.post_json("/api/accounts/sign-out", {})
+            wrong_username = server.post_json_status(
+                "/api/accounts/sign-in",
+                {
+                    "username": "wrong_field_user",
+                    "email": "person@example.com",
+                    "password": "strong-password",
+                },
+            )
+            wrong_password = server.post_json_status(
+                "/api/accounts/sign-in",
+                {
+                    "username": "auth_field_user",
+                    "email": "person@example.com",
+                    "password": "wrong-password",
+                },
+            )
+            wrong_email_password = server.post_json_status(
+                "/api/accounts/sign-in",
+                {
+                    "username": "auth_field_user",
+                    "email": "wrong@example.com",
+                    "password": "wrong-password",
+                },
+            )
+            wrong_all = server.post_json_status(
+                "/api/accounts/sign-in",
+                {
+                    "username": "missing_field_user",
+                    "email": "missing@example.com",
+                    "password": "wrong-password",
+                },
+            )
+
+        self.assertEqual(wrong_username["status"], 401)
+        self.assertEqual(wrong_username["data"]["error"], "Incorrect username")
+        self.assertEqual(wrong_username["data"]["authErrorFields"], ["username"])
+        self.assertEqual(wrong_password["status"], 401)
+        self.assertEqual(wrong_password["data"]["error"], "Incorrect password")
+        self.assertEqual(wrong_password["data"]["authErrorFields"], ["password"])
+        self.assertEqual(wrong_email_password["status"], 401)
+        self.assertEqual(wrong_email_password["data"]["error"], "Incorrect email and password")
+        self.assertEqual(wrong_email_password["data"]["authErrorFields"], ["email", "password"])
+        self.assertEqual(wrong_all["status"], 401)
+        self.assertEqual(wrong_all["data"]["error"], "Incorrect username, email, and password")
+        self.assertEqual(wrong_all["data"]["authErrorFields"], ["username", "email", "password"])
 
     def test_profile_picture_can_be_added_and_removed(self) -> None:
         profile_picture = (
@@ -664,7 +722,7 @@ class AccountWebTests(unittest.TestCase):
             (0, 0, 0),
         )
 
-    def test_signed_in_rate_limit_timezone_stays_locked_to_first_check(self) -> None:
+    def test_signed_in_rate_limit_timezone_uses_current_browser_time_zone(self) -> None:
         sydney_headers = {"X-Learny-Time-Zone": "Australia/Sydney"}
         los_angeles_headers = {"X-Learny-Time-Zone": "America/Los_Angeles"}
         with run_account_server() as server:
@@ -679,10 +737,15 @@ class AccountWebTests(unittest.TestCase):
             first["resetAt"] / 1000,
             timezone.utc,
         ).astimezone(ZoneInfo("Australia/Sydney"))
-        self.assertEqual(changed["resetAt"], first["resetAt"])
+        changed_reset = datetime.fromtimestamp(
+            changed["resetAt"] / 1000,
+            timezone.utc,
+        ).astimezone(ZoneInfo("America/Los_Angeles"))
+        self.assertNotEqual(changed["resetAt"], first["resetAt"])
         self.assertEqual((first_reset.hour, first_reset.minute, first_reset.second), (0, 0, 0))
+        self.assertEqual((changed_reset.hour, changed_reset.minute, changed_reset.second), (0, 0, 0))
 
-    def test_guest_rate_limit_timezone_survives_cookie_session_reset_by_ip(self) -> None:
+    def test_guest_rate_limit_timezone_uses_current_browser_time_zone_after_session_reset(self) -> None:
         first_headers = {
             "X-Learny-Time-Zone": "Australia/Sydney",
             "X-Forwarded-For": "203.0.113.12",
@@ -697,11 +760,11 @@ class AccountWebTests(unittest.TestCase):
             first = server.get_json("/api/rate-limit", first_headers)["rateLimit"]
             reset = server.get_json("/api/rate-limit", reset_headers)["rateLimit"]
 
-        self.assertEqual(reset["resetAt"], first["resetAt"])
+        self.assertNotEqual(reset["resetAt"], first["resetAt"])
         reset_time = datetime.fromtimestamp(
             reset["resetAt"] / 1000,
             timezone.utc,
-        ).astimezone(ZoneInfo("Australia/Sydney"))
+        ).astimezone(ZoneInfo("America/Los_Angeles"))
         self.assertEqual((reset_time.hour, reset_time.minute, reset_time.second), (0, 0, 0))
 
     def test_adamsrealm1_can_reset_everyones_rate_limits(self) -> None:

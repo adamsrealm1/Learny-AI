@@ -36,6 +36,7 @@ from .database import (
     _clean_username,
     _hash_password,
     _hash_token,
+    _is_auth_password_input_valid,
     _message_from_row,
     _messages_with_preserved_history_text,
     _now_ms,
@@ -185,14 +186,6 @@ class MySQLLearnyDatabase:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """,
             """
-            CREATE TABLE IF NOT EXISTS rate_limit_time_zones (
-                lock_key VARCHAR(160) NOT NULL,
-                time_zone VARCHAR(80) NOT NULL,
-                locked_at BIGINT NOT NULL,
-                PRIMARY KEY (lock_key)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            """,
-            """
             CREATE TABLE IF NOT EXISTS moderation_bans (
                 id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                 kind VARCHAR(16) NOT NULL,
@@ -311,21 +304,52 @@ class MySQLLearnyDatabase:
         }
 
     def authenticate(self, username: str, password: str, email: str | None = None) -> dict[str, Any]:
-        username = _clean_username(username)
-        clean_email = _clean_email(email or "", required=False)
+        auth_errors: list[str] = []
+        try:
+            username = _clean_username(username)
+        except AccountError:
+            username = str(username or "").strip()
+            auth_errors.append("username")
+        raw_email = str(email or "").strip()
+        try:
+            clean_email = _clean_email(raw_email, required=False)
+        except AccountError:
+            clean_email = ""
+            auth_errors.append("email")
+        password_is_usable = _is_auth_password_input_valid(password)
+        if not password_is_usable:
+            auth_errors.append("password")
         now = _now_ms()
         with self._lock, self._connect() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT * FROM accounts WHERE username_key = %s", (username.casefold(),))
-                row = cursor.fetchone()
-                if row is None:
-                    raise AuthenticationError("Account could not be authenticated.")
+                row_by_username = None
+                if "username" not in auth_errors:
+                    cursor.execute("SELECT * FROM accounts WHERE username_key = %s", (username.casefold(),))
+                    row_by_username = cursor.fetchone()
+                row_by_email = None
+                if clean_email:
+                    cursor.execute("SELECT * FROM accounts WHERE email = %s ORDER BY id LIMIT 1", (clean_email,))
+                    row_by_email = cursor.fetchone()
+                row = row_by_username or row_by_email
 
-                expected_hash = _hash_password(password, str(row["password_salt"]))
-                if not hmac.compare_digest(expected_hash, str(row["password_hash"])):
-                    raise AuthenticationError("Account could not be authenticated.")
-                if clean_email and clean_email != str(row.get("email") or "").casefold():
-                    raise AuthenticationError("Account could not be authenticated.")
+                if row_by_username is None and "username" not in auth_errors:
+                    auth_errors.append("username")
+                if raw_email and "email" not in auth_errors:
+                    if row is None or clean_email != str(row.get("email") or "").casefold():
+                        auth_errors.append("email")
+
+                if row is None:
+                    if "password" not in auth_errors:
+                        auth_errors.append("password")
+                    raise AuthenticationError(auth_errors)
+
+                if password_is_usable:
+                    expected_hash = _hash_password(password, str(row["password_salt"]))
+                    if not hmac.compare_digest(expected_hash, str(row["password_hash"])):
+                        auth_errors.append("password")
+
+                if auth_errors:
+                    raise AuthenticationError(auth_errors)
 
                 account_id = int(row["id"])
                 cursor.execute("UPDATE accounts SET last_seen_at = %s WHERE id = %s", (now, account_id))
@@ -762,40 +786,6 @@ class MySQLLearnyDatabase:
                     (clean_identity_key,),
                 )
                 return int(cursor.rowcount)
-
-    def locked_rate_limit_time_zone(self, lock_key: str, requested_time_zone: str | None) -> str:
-        clean_lock_key = _clean_rate_limit_identity(lock_key)
-        clean_time_zone = _clean_rate_limit_time_zone(requested_time_zone)
-        with self._lock, self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    INSERT IGNORE INTO rate_limit_time_zones (lock_key, time_zone, locked_at)
-                    VALUES (%s, %s, %s)
-                    """,
-                    (clean_lock_key, clean_time_zone, _now_ms()),
-                )
-                cursor.execute(
-                    "SELECT time_zone FROM rate_limit_time_zones WHERE lock_key = %s",
-                    (clean_lock_key,),
-                )
-                row = cursor.fetchone()
-        if row is None:
-            return clean_time_zone
-        return _clean_rate_limit_time_zone(str(row["time_zone"]))
-
-    def rate_limit_time_zone(self, lock_key: str, fallback_time_zone: str | None = None) -> str:
-        clean_lock_key = _clean_rate_limit_identity(lock_key)
-        with self._lock, self._connect() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    "SELECT time_zone FROM rate_limit_time_zones WHERE lock_key = %s",
-                    (clean_lock_key,),
-                )
-                row = cursor.fetchone()
-        if row is None:
-            return _clean_rate_limit_time_zone(fallback_time_zone)
-        return _clean_rate_limit_time_zone(str(row["time_zone"]))
 
     def _rate_limit_snapshot(
         self,

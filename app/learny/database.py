@@ -46,6 +46,17 @@ class AccountError(ValueError):
 class AuthenticationError(ValueError):
     """Raised when a username/password pair cannot be authenticated."""
 
+    def __init__(self, fields: list[str] | tuple[str, ...] | None = None) -> None:
+        ordered_fields = [
+            field
+            for field in ("username", "email", "password")
+            if field in set(fields or ())
+        ]
+        if not ordered_fields:
+            ordered_fields = ["username", "password"]
+        self.fields = tuple(ordered_fields)
+        super().__init__(_authentication_error_message(self.fields))
+
 
 class LearnyDatabase:
     backend_name = "sqlite"
@@ -131,12 +142,6 @@ class LearnyDatabase:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     identity_key TEXT NOT NULL,
                     created_at INTEGER NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS rate_limit_time_zones (
-                    lock_key TEXT PRIMARY KEY,
-                    time_zone TEXT NOT NULL,
-                    locked_at INTEGER NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS moderation_bans (
@@ -283,22 +288,55 @@ class LearnyDatabase:
         }
 
     def authenticate(self, username: str, password: str, email: str | None = None) -> dict[str, Any]:
-        username = _clean_username(username)
-        clean_email = _clean_email(email or "", required=False)
+        auth_errors: list[str] = []
+        try:
+            username = _clean_username(username)
+        except AccountError:
+            username = str(username or "").strip()
+            auth_errors.append("username")
+        raw_email = str(email or "").strip()
+        try:
+            clean_email = _clean_email(raw_email, required=False)
+        except AccountError:
+            clean_email = ""
+            auth_errors.append("email")
+        password_is_usable = _is_auth_password_input_valid(password)
+        if not password_is_usable:
+            auth_errors.append("password")
         now = _now_ms()
         with self._lock, self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM accounts WHERE username = ?",
-                (username,),
-            ).fetchone()
-            if row is None:
-                raise AuthenticationError("Account could not be authenticated.")
+            row_by_username = None
+            if "username" not in auth_errors:
+                row_by_username = connection.execute(
+                    "SELECT * FROM accounts WHERE username = ?",
+                    (username,),
+                ).fetchone()
+            row_by_email = None
+            if clean_email:
+                row_by_email = connection.execute(
+                    "SELECT * FROM accounts WHERE email = ? ORDER BY id LIMIT 1",
+                    (clean_email,),
+                ).fetchone()
+            row = row_by_username or row_by_email
 
-            expected_hash = _hash_password(password, str(row["password_salt"]))
-            if not hmac.compare_digest(expected_hash, str(row["password_hash"])):
-                raise AuthenticationError("Account could not be authenticated.")
-            if clean_email and clean_email != _row_string(row, "email").casefold():
-                raise AuthenticationError("Account could not be authenticated.")
+            if row_by_username is None and "username" not in auth_errors:
+                auth_errors.append("username")
+            if raw_email and "email" not in auth_errors:
+                if row is None or clean_email != _row_string(row, "email").casefold():
+                    auth_errors.append("email")
+
+            if row is None:
+                if "password" not in auth_errors:
+                    auth_errors.append("password")
+                raise AuthenticationError(auth_errors)
+
+            if password_is_usable:
+                expected_hash = _hash_password(password, str(row["password_salt"]))
+                if not hmac.compare_digest(expected_hash, str(row["password_hash"])):
+                    auth_errors.append("password")
+
+            if auth_errors:
+                raise AuthenticationError(auth_errors)
 
             connection.execute(
                 "UPDATE accounts SET last_seen_at = ? WHERE id = ?",
@@ -726,36 +764,6 @@ class LearnyDatabase:
             )
             return int(cursor.rowcount if cursor.rowcount is not None else 0)
 
-    def locked_rate_limit_time_zone(self, lock_key: str, requested_time_zone: str | None) -> str:
-        clean_lock_key = _clean_rate_limit_identity(lock_key)
-        clean_time_zone = _clean_rate_limit_time_zone(requested_time_zone)
-        with self._lock, self._connect() as connection:
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO rate_limit_time_zones (lock_key, time_zone, locked_at)
-                VALUES (?, ?, ?)
-                """,
-                (clean_lock_key, clean_time_zone, _now_ms()),
-            )
-            row = connection.execute(
-                "SELECT time_zone FROM rate_limit_time_zones WHERE lock_key = ?",
-                (clean_lock_key,),
-            ).fetchone()
-        if row is None:
-            return clean_time_zone
-        return _clean_rate_limit_time_zone(str(row["time_zone"]))
-
-    def rate_limit_time_zone(self, lock_key: str, fallback_time_zone: str | None = None) -> str:
-        clean_lock_key = _clean_rate_limit_identity(lock_key)
-        with self._lock, self._connect() as connection:
-            row = connection.execute(
-                "SELECT time_zone FROM rate_limit_time_zones WHERE lock_key = ?",
-                (clean_lock_key,),
-            ).fetchone()
-        if row is None:
-            return _clean_rate_limit_time_zone(fallback_time_zone)
-        return _clean_rate_limit_time_zone(str(row["time_zone"]))
-
     def list_chats(self, account_id: int) -> list[dict[str, Any]]:
         with self._lock, self._connect() as connection:
             chat_rows = connection.execute(
@@ -1072,6 +1080,18 @@ def _ban_from_row(row: Any) -> dict[str, Any]:
 def _validate_password(password: str) -> None:
     if not isinstance(password, str) or len(password) < 8 or len(password) > 256:
         raise AccountError("Account input is invalid.")
+
+
+def _authentication_error_message(fields: tuple[str, ...]) -> str:
+    if len(fields) == 1:
+        return f"Incorrect {fields[0]}"
+    if len(fields) == 2:
+        return f"Incorrect {fields[0]} and {fields[1]}"
+    return f"Incorrect {', '.join(fields[:-1])}, and {fields[-1]}"
+
+
+def _is_auth_password_input_valid(password: str) -> bool:
+    return isinstance(password, str) and 1 <= len(password) <= 256
 
 
 def _hash_password(password: str, salt: str) -> str:
