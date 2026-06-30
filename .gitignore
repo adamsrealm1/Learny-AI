@@ -13,3 +13,5 @@ env/
 data/
 *.sqlite3
 *.log
+Learny AI.exe
+LearnyAI_desktop.py
