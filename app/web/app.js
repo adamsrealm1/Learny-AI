@@ -36,6 +36,9 @@ const attachmentAuthForm = document.querySelector("#attachmentAuthForm");
 const attachmentAuthPassword = document.querySelector("#attachmentAuthPassword");
 const attachmentAuthOk = document.querySelector("#attachmentAuthOk");
 const attachmentAuthMessage = document.querySelector("#attachmentAuthMessage");
+const attachmentLimitModal = document.querySelector("#attachmentLimitModal");
+const attachmentLimitBackdrop = document.querySelector("#attachmentLimitBackdrop");
+const attachmentLimitOk = document.querySelector("#attachmentLimitOk");
 const emptyState = document.querySelector("#emptyState");
 const starField = document.querySelector("#starField");
 const appShell = document.querySelector(".app-shell");
@@ -126,7 +129,7 @@ const PROFILE_ICON_PATH = appAssetPath("icon_library/profile.png");
 const PROFILE_PICTURE_MAX_BYTES = 512 * 1024;
 const PROFILE_PICTURE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 const ATTACHMENT_MAX_BYTES = 4 * 1024 * 1024;
-const ATTACHMENT_LIMIT = 10;
+const ATTACHMENT_LIMIT = 5;
 const GUEST_CHAT_LIMIT = 1;
 const SIGNED_IN_CHAT_LIMIT = 10;
 const ATTACHMENT_EXTENSIONS = new Set(["txt", "md", "log", "docx", "rtf", "pdf", "csv", "json", "xml"]);
@@ -739,12 +742,14 @@ function clearSelectedAttachments() {
 
 function addSelectedAttachments(files) {
   const nextAttachments = [...selectedAttachments];
+  let exceededLimit = false;
   for (const file of files) {
-    if (nextAttachments.length >= ATTACHMENT_LIMIT) {
-      break;
-    }
     if (!isAllowedAttachmentFile(file)) {
       continue;
+    }
+    if (nextAttachments.length >= ATTACHMENT_LIMIT) {
+      exceededLimit = true;
+      break;
     }
     nextAttachments.push({
       file,
@@ -756,6 +761,10 @@ function addSelectedAttachments(files) {
     fileInput.value = "";
   }
   renderAttachmentTray();
+  if (exceededLimit) {
+    openAttachmentLimitPopup();
+  }
+  return exceededLimit;
 }
 
 function removeSelectedAttachment(index) {
@@ -1284,7 +1293,7 @@ const GUEST_ACCESS_COPY = {
   chatLimit: {
     title: "You are limited to one conversation right now.",
     description:
-      "Users who are not signed in can only keep one conversation open, and the conversation along with its messages are deleted. Create a free account to keep up to 10 saved conversations with their messages.",
+      "Users who are not signed in can only keep one conversation open, and the conversation along with its messages are deleted after a page refresh. Create a free account to keep up to 10 saved conversations with their messages.",
   },
   attachments: {
     title: "You can't upload a file right now.",
@@ -1322,6 +1331,27 @@ function closeGuestAccessPopup() {
   }
   guestAccessModal.hidden = true;
   document.body.classList.remove("guest-access-open");
+}
+
+function openAttachmentLimitPopup() {
+  if (!attachmentLimitModal) {
+    return;
+  }
+  attachmentLimitModal.hidden = false;
+  document.body.classList.add("attachment-limit-open");
+  window.setTimeout(() => {
+    if (attachmentLimitOk) {
+      attachmentLimitOk.focus();
+    }
+  }, 70);
+}
+
+function closeAttachmentLimitPopup() {
+  if (!attachmentLimitModal || attachmentLimitModal.hidden) {
+    return;
+  }
+  attachmentLimitModal.hidden = true;
+  document.body.classList.remove("attachment-limit-open");
 }
 
 function openAccountFromGuestAccess(view) {
@@ -3807,8 +3837,10 @@ if (attachButton && fileInput) {
     if (files.length === 0) {
       return;
     }
-    addSelectedAttachments(files);
-    messageInput.focus();
+    const exceededLimit = addSelectedAttachments(files);
+    if (!exceededLimit) {
+      messageInput.focus();
+    }
   });
 }
 
@@ -3931,6 +3963,14 @@ if (guestAccessSignIn) {
   guestAccessSignIn.addEventListener("click", () => openAccountFromGuestAccess("sign-in"));
 }
 
+if (attachmentLimitBackdrop) {
+  attachmentLimitBackdrop.addEventListener("click", closeAttachmentLimitPopup);
+}
+
+if (attachmentLimitOk) {
+  attachmentLimitOk.addEventListener("click", closeAttachmentLimitPopup);
+}
+
 if (attachmentAuthBackdrop) {
   attachmentAuthBackdrop.addEventListener("click", closeAttachmentAuthPopup);
 }
@@ -4042,6 +4082,10 @@ if (mobileSidebarMedia) {
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (attachmentLimitModal && !attachmentLimitModal.hidden) {
+      closeAttachmentLimitPopup();
+      return;
+    }
     if (attachmentAuthModal && !attachmentAuthModal.hidden) {
       closeAttachmentAuthPopup();
       return;

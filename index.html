@@ -8,6 +8,7 @@
     <link rel="apple-touch-icon" href="./logos/Learny.png">
     <meta name="application-name" content="Learny AI">
     <meta property="og:image" content="./logos/Learny.png">
+    <meta name="description" content="Learny is a fast, smart, all-purpose AI assistant built to help with almost anything.">
     <style>
       html,
       body {
@@ -589,6 +590,26 @@
       </section>
     </div>
 
+    <div class="attachment-limit-modal" id="attachmentLimitModal" hidden>
+      <button class="attachment-limit-backdrop" id="attachmentLimitBackdrop" type="button" aria-label="Close attachment limit popup"></button>
+      <section
+        class="attachment-limit-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="attachmentLimitTitle"
+        aria-describedby="attachmentLimitDescription"
+      >
+        <div class="attachment-limit-copy">
+          <p class="attachment-limit-kicker">Attachment limit</p>
+          <h2 id="attachmentLimitTitle">You can attach up to 5 files right now.</h2>
+          <p id="attachmentLimitDescription">
+            Learny can process 5 files in one message at the moment. We are constantly improving Learny AI, and the maximum file limit will increase over time as uploads get faster and more reliable.
+          </p>
+        </div>
+        <button class="attachment-limit-ok" id="attachmentLimitOk" type="button">Got it.</button>
+      </section>
+    </div>
+
     <div class="attachment-auth-modal" id="attachmentAuthModal" hidden>
       <button class="attachment-auth-backdrop" id="attachmentAuthBackdrop" type="button" aria-label="Close attachment verification"></button>
       <section
@@ -630,6 +651,6 @@
     </template>
 
     <script src="./app/web/markdown.js?v=ratelimit1" defer></script>
-    <script src="./app/web/app.js?v=timezone-refresh1" defer></script>
+    <script src="./app/web/app.js?v=attachment-limit1" defer></script>
   </body>
 </html>

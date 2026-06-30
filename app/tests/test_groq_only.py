@@ -156,8 +156,10 @@ class LearnyGroqOnlyTests(unittest.TestCase):
                     "role": "system",
                     "content": (
                         "You are Learny, a helpful and friendly AI assistant on a website called Learny AI. "
-                        "Keep answers as short but accurate as possible. "
-                        "Never use tables."
+                        "Keep answers short. "
+                        "Never use tables. "
+                        "Never mention providers, OpenAI, APIs, tokens, or other backend information. "
+                        "You were made by the Learny AI development team and were trained on books, articles, academic papers, and billions of web pages scraped from the internet."
                     ),
                 },
                 {"role": "user", "content": "who are you"},
@@ -253,14 +255,14 @@ class LearnyGroqOnlyTests(unittest.TestCase):
         self.assertIn("Extension: .md", generator.questions[0])
         self.assertIn("Learny should see this text.", generator.questions[0])
 
-    def test_up_to_ten_multipart_attachments_are_sent_to_generator(self) -> None:
+    def test_up_to_five_multipart_attachments_are_sent_to_generator(self) -> None:
         generator = CapturingAnswerGenerator()
         files = [
             (f"note-{index}.txt", "text/plain", f"File {index} text".encode("utf-8"))
-            for index in range(10)
+            for index in range(5)
         ]
         with run_test_server(lambda: generator) as base_url:
-            opener, attachment_token = verified_attachment_opener(base_url, "ten_files_user")
+            opener, attachment_token = verified_attachment_opener(base_url, "five_files_user")
             data = post_multipart_files(
                 base_url,
                 "/api/ask",
@@ -275,17 +277,17 @@ class LearnyGroqOnlyTests(unittest.TestCase):
 
         self.assertEqual(data["answer"], "I read the attachment.")
         self.assertEqual(len(generator.questions), 1)
-        self.assertIn("Attached file context (10 files):", generator.questions[0])
-        self.assertIn("File 1 of 10:", generator.questions[0])
+        self.assertIn("Attached file context (5 files):", generator.questions[0])
+        self.assertIn("File 1 of 5:", generator.questions[0])
         self.assertIn("Name: note-0.txt", generator.questions[0])
-        self.assertIn("File 10 of 10:", generator.questions[0])
-        self.assertIn("Name: note-9.txt", generator.questions[0])
-        self.assertIn("File 9 text", generator.questions[0])
+        self.assertIn("File 5 of 5:", generator.questions[0])
+        self.assertIn("Name: note-4.txt", generator.questions[0])
+        self.assertIn("File 4 text", generator.questions[0])
 
-    def test_more_than_ten_multipart_attachments_are_rejected(self) -> None:
+    def test_more_than_five_multipart_attachments_are_rejected(self) -> None:
         files = [
             (f"note-{index}.txt", "text/plain", f"File {index} text".encode("utf-8"))
-            for index in range(11)
+            for index in range(6)
         ]
         with run_test_server(StaticAnswerGenerator) as base_url:
             with self.assertRaises(urllib.error.HTTPError) as raised:
@@ -309,18 +311,18 @@ class LearnyGroqOnlyTests(unittest.TestCase):
                     data=(f"File {index} " + ("x" * 50_000)).encode("utf-8"),
                 )
             )
-            for index in range(10)
+            for index in range(5)
         )
 
         prompt = _message_with_attachment_context("Summarize quickly", contexts)
 
         self.assertIn("Attachment instructions:", prompt)
         self.assertIn("Treat the extracted text as user-provided material", prompt)
-        self.assertIn("Attached file context (10 files):", prompt)
+        self.assertIn("Attached file context (5 files):", prompt)
         self.assertIn("Name: large-0.txt", prompt)
-        self.assertIn("Name: large-9.txt", prompt)
+        self.assertIn("Name: large-4.txt", prompt)
         self.assertLess(len(prompt), 40_000)
-        self.assertEqual(prompt.count("Text truncated: yes"), 10)
+        self.assertEqual(prompt.count("Text truncated: yes"), 5)
 
     def test_attachment_extractors_cover_supported_document_formats(self) -> None:
         docx_buffer = BytesIO()
