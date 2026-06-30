@@ -289,24 +289,34 @@ class LearnyDatabase:
 
     def authenticate(self, username: str, password: str, email: str | None = None) -> dict[str, Any]:
         auth_errors: list[str] = []
-        try:
-            username = _clean_username(username)
-        except AccountError:
-            username = str(username or "").strip()
-            auth_errors.append("username")
+        raw_username = str(username or "").strip()
         raw_email = str(email or "").strip()
-        try:
-            clean_email = _clean_email(raw_email, required=False)
-        except AccountError:
-            clean_email = ""
-            auth_errors.append("email")
+        username_is_email = not raw_email and "@" in raw_username
+        clean_email = ""
+        if username_is_email:
+            username = ""
+            try:
+                clean_email = _clean_email(raw_username, required=False)
+            except AccountError:
+                auth_errors.append("email")
+        else:
+            try:
+                username = _clean_username(raw_username)
+            except AccountError:
+                username = raw_username
+                auth_errors.append("username")
+            try:
+                clean_email = _clean_email(raw_email, required=False)
+            except AccountError:
+                clean_email = ""
+                auth_errors.append("email")
         password_is_usable = _is_auth_password_input_valid(password)
         if not password_is_usable:
             auth_errors.append("password")
         now = _now_ms()
         with self._lock, self._connect() as connection:
             row_by_username = None
-            if "username" not in auth_errors:
+            if not username_is_email and "username" not in auth_errors:
                 row_by_username = connection.execute(
                     "SELECT * FROM accounts WHERE username = ?",
                     (username,),
@@ -319,14 +329,17 @@ class LearnyDatabase:
                 ).fetchone()
             row = row_by_username or row_by_email
 
-            if row_by_username is None and "username" not in auth_errors:
+            if username_is_email:
+                if row_by_email is None and "email" not in auth_errors:
+                    auth_errors.append("email")
+            elif row_by_username is None and "username" not in auth_errors:
                 auth_errors.append("username")
-            if raw_email and "email" not in auth_errors:
+            if raw_email and not username_is_email and "email" not in auth_errors:
                 if row is None or clean_email != _row_string(row, "email").casefold():
                     auth_errors.append("email")
 
             if row is None:
-                if "password" not in auth_errors:
+                if raw_email and "username" in auth_errors and "email" in auth_errors and "password" not in auth_errors:
                     auth_errors.append("password")
                 raise AuthenticationError(auth_errors)
 

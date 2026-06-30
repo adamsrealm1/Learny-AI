@@ -441,6 +441,10 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                     self._send_ban_response(ban)
                     return
                 account = database.authenticate(username, password, email)
+                ban = self._ban_for(username=str(account["username"]))
+                if ban:
+                    self._send_ban_response(ban)
+                    return
                 token = database.create_session(int(account["id"]))
             except AuthenticationError as error:
                 self._send_json(

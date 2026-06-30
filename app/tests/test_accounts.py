@@ -163,6 +163,11 @@ class AccountWebTests(unittest.TestCase):
                     "password": "strong-password",
                 },
             )
+            server.post_json("/api/accounts/sign-out", {})
+            signed_in_with_combined_field = server.post_json(
+                "/api/accounts/sign-in",
+                {"username": "person@example.com", "password": "strong-password"},
+            )
 
         self.assertEqual(missing_email["status"], 400)
         self.assertEqual(invalid_email["status"], 400)
@@ -173,6 +178,8 @@ class AccountWebTests(unittest.TestCase):
         self.assertTrue(signed_in_without_email["authenticated"])
         self.assertTrue(signed_in_with_email["authenticated"])
         self.assertEqual(signed_in_with_email["account"]["email"], "***son@example.com")
+        self.assertTrue(signed_in_with_combined_field["authenticated"])
+        self.assertEqual(signed_in_with_combined_field["account"]["username"], "email_user")
 
     def test_sign_in_reports_incorrect_auth_fields(self) -> None:
         with run_account_server() as server:
@@ -217,6 +224,20 @@ class AccountWebTests(unittest.TestCase):
                     "password": "wrong-password",
                 },
             )
+            combined_wrong_email = server.post_json_status(
+                "/api/accounts/sign-in",
+                {
+                    "username": "missing@example.com",
+                    "password": "strong-password",
+                },
+            )
+            combined_wrong_password = server.post_json_status(
+                "/api/accounts/sign-in",
+                {
+                    "username": "person@example.com",
+                    "password": "wrong-password",
+                },
+            )
 
         self.assertEqual(wrong_username["status"], 401)
         self.assertEqual(wrong_username["data"]["error"], "Incorrect username")
@@ -230,6 +251,12 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(wrong_all["status"], 401)
         self.assertEqual(wrong_all["data"]["error"], "Incorrect username, email, and password")
         self.assertEqual(wrong_all["data"]["authErrorFields"], ["username", "email", "password"])
+        self.assertEqual(combined_wrong_email["status"], 401)
+        self.assertEqual(combined_wrong_email["data"]["error"], "Incorrect email")
+        self.assertEqual(combined_wrong_email["data"]["authErrorFields"], ["email"])
+        self.assertEqual(combined_wrong_password["status"], 401)
+        self.assertEqual(combined_wrong_password["data"]["error"], "Incorrect password")
+        self.assertEqual(combined_wrong_password["data"]["authErrorFields"], ["password"])
 
     def test_profile_picture_can_be_added_and_removed(self) -> None:
         profile_picture = (
