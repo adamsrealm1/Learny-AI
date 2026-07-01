@@ -143,6 +143,10 @@ const WORD_REVEAL_FOOTER_DELAY_MS = 850;
 const WORD_REVEAL_COMMA_PAUSE_MS = 92;
 const WORD_REVEAL_SENTENCE_PAUSE_MS = 180;
 const WORD_REVEAL_MAX_WORDS_PER_FRAME = 4;
+const WORD_REVEAL_END_SPLIT_LETTERS = 8;
+const WORD_REVEAL_END_SLOWDOWN_UNITS = 7;
+const WORD_REVEAL_END_SLOWDOWN_MULTIPLIER = 4.2;
+const WORD_REVEAL_END_SLOWDOWN_MAX_MS = 420;
 const WELCOME_TEXT = "What's on your mind?";
 const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
@@ -470,59 +474,91 @@ function prepareWordReveal(container) {
     node.replaceWith(fragment);
   });
 
-  return words;
+  return splitRevealTailLetters(words);
 }
 
-function wordRevealStep(word) {
+function createRevealUnit(text) {
+  const unit = document.createElement("span");
+  unit.className = "word-fade";
+  unit.style.animationDuration = `${WORD_REVEAL_DURATION_MS}ms`;
+  unit.textContent = text;
+  return unit;
+}
+
+function splitRevealTailLetters(words) {
+  const revealUnits = words.slice();
+  let lettersLeft = WORD_REVEAL_END_SPLIT_LETTERS;
+
+  for (let index = revealUnits.length - 1; index >= 0 && lettersLeft > 0; index -= 1) {
+    const word = revealUnits[index];
+    const originalText = String(word && word.textContent ? word.textContent : "");
+    const visibleStart = originalText.search(/\S/);
+    if (visibleStart < 0) {
+      continue;
+    }
+
+    const leadingWhitespace = originalText.slice(0, visibleStart);
+    const visibleText = originalText.slice(visibleStart);
+    const letters = Array.from(visibleText);
+    const splitStart = Math.max(0, letters.length - lettersLeft);
+    const prefixText = letters.slice(0, splitStart).join("");
+    const tailLetters = letters.slice(splitStart);
+    const replacements = [];
+
+    if (prefixText) {
+      replacements.push(createRevealUnit(`${leadingWhitespace}${prefixText}`));
+    } else if (tailLetters.length > 0) {
+      tailLetters[0] = `${leadingWhitespace}${tailLetters[0]}`;
+    }
+
+    tailLetters.forEach((letter) => {
+      replacements.push(createRevealUnit(letter));
+    });
+
+    if (replacements.length > 0) {
+      word.replaceWith(...replacements);
+      revealUnits.splice(index, 1, ...replacements);
+      lettersLeft -= tailLetters.length;
+    }
+  }
+
+  return revealUnits;
+}
+
+function wordRevealStep(word, remainingUnits = Infinity) {
   const text = String(word && word.textContent ? word.textContent : "").trim();
+  let delay = WORD_REVEAL_STEP_MS;
   if (/[.!?)]$/.test(text)) {
-    return WORD_REVEAL_SENTENCE_PAUSE_MS;
+    delay = WORD_REVEAL_SENTENCE_PAUSE_MS;
+  } else if (/[,;:]$/.test(text)) {
+    delay = WORD_REVEAL_COMMA_PAUSE_MS;
+  } else if (text.length > 12) {
+    delay = WORD_REVEAL_STEP_MS + 18;
   }
-  if (/[,;:]$/.test(text)) {
-    return WORD_REVEAL_COMMA_PAUSE_MS;
+  if (
+    Number.isFinite(remainingUnits) &&
+    remainingUnits > 0 &&
+    remainingUnits <= WORD_REVEAL_END_SLOWDOWN_UNITS
+  ) {
+    const endProgress =
+      (WORD_REVEAL_END_SLOWDOWN_UNITS - remainingUnits + 1) /
+      WORD_REVEAL_END_SLOWDOWN_UNITS;
+    const multiplier =
+      1 + endProgress * (WORD_REVEAL_END_SLOWDOWN_MULTIPLIER - 1);
+    delay = Math.min(
+      WORD_REVEAL_END_SLOWDOWN_MAX_MS,
+      Math.round(delay * multiplier),
+    );
   }
-  if (text.length > 12) {
-    return WORD_REVEAL_STEP_MS + 18;
-  }
-  return WORD_REVEAL_STEP_MS;
-}
-
-function createRevealToggleButton() {
-  const button = document.createElement("button");
-  button.className = "reveal-toggle-button";
-  button.type = "button";
-  button.title = "Pause typing";
-  button.setAttribute("aria-label", "Pause typing");
-
-  const icon = document.createElement("span");
-  icon.className = "reveal-toggle-icon";
-  icon.setAttribute("aria-hidden", "true");
-  button.append(icon);
-  return button;
-}
-
-function syncRevealToggleButton(button, paused) {
-  if (!button) {
-    return;
-  }
-  button.classList.toggle("is-paused", paused);
-  button.title = paused ? "Resume typing" : "Pause typing";
-  button.setAttribute("aria-label", paused ? "Resume typing" : "Pause typing");
+  return delay;
 }
 
 function startWordReveal(node, bubble, words) {
   const revealWords = Array.isArray(words) ? words : [];
-  const controls = document.createElement("div");
-  controls.className = "message-reveal-controls";
-  const toggleButton = createRevealToggleButton();
-  controls.append(toggleButton);
-  bubble.append(controls);
 
   let wordIndex = 0;
   let frameId = 0;
   let nextRevealAt = performance.now();
-  let remainingDelay = 0;
-  let paused = false;
   let completed = false;
   let lastPinnedScrollAt = 0;
 
@@ -543,9 +579,7 @@ function startWordReveal(node, bubble, words) {
       window.cancelAnimationFrame(frameId);
       frameId = 0;
     }
-    controls.classList.add("is-complete");
     window.setTimeout(() => {
-      controls.remove();
       node.classList.add("reveal-complete");
       scrollChatToBottom({ smooth: false });
     }, WORD_REVEAL_FOOTER_DELAY_MS);
@@ -560,7 +594,7 @@ function startWordReveal(node, bubble, words) {
     word.classList.add("word-visible");
     wordIndex += 1;
     pinScroll(now);
-    nextRevealAt = now + wordRevealStep(word);
+    nextRevealAt = now + wordRevealStep(word, revealWords.length - wordIndex);
   }
 
   function tick(now) {
@@ -569,9 +603,6 @@ function startWordReveal(node, bubble, words) {
     }
     if (!node.isConnected) {
       completeReveal();
-      return;
-    }
-    if (paused) {
       return;
     }
     if (wordIndex >= revealWords.length) {
@@ -590,46 +621,12 @@ function startWordReveal(node, bubble, words) {
     frameId = window.requestAnimationFrame(tick);
   }
 
-  function pauseReveal() {
-    if (paused || completed) {
-      return;
-    }
-    paused = true;
-    remainingDelay = Math.max(0, nextRevealAt - performance.now());
-    if (frameId) {
-      window.cancelAnimationFrame(frameId);
-      frameId = 0;
-    }
-    node.classList.add("reveal-paused");
-    syncRevealToggleButton(toggleButton, true);
-  }
-
-  function resumeReveal() {
-    if (!paused || completed) {
-      return;
-    }
-    paused = false;
-    nextRevealAt = performance.now() + remainingDelay;
-    node.classList.remove("reveal-paused");
-    syncRevealToggleButton(toggleButton, false);
-    frameId = window.requestAnimationFrame(tick);
-  }
-
-  toggleButton.addEventListener("click", () => {
-    if (paused) {
-      resumeReveal();
-    } else {
-      pauseReveal();
-    }
-  });
-
   if (revealWords.length === 0) {
     completeReveal();
-    return { pause: pauseReveal, resume: resumeReveal };
+    return;
   }
 
   frameId = window.requestAnimationFrame(tick);
-  return { pause: pauseReveal, resume: resumeReveal };
 }
 
 function scrollChatToBottom({ smooth = true } = {}) {
