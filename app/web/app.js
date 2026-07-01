@@ -435,7 +435,7 @@ function prepareWordReveal(container) {
       if (!node.nodeValue || !node.nodeValue.trim()) {
         return NodeFilter.FILTER_REJECT;
       }
-      if (node.parentElement && node.parentElement.closest("pre, code, script, style")) {
+      if (node.parentElement && node.parentElement.closest("script, style")) {
         return NodeFilter.FILTER_REJECT;
       }
       return NodeFilter.FILTER_ACCEPT;
@@ -553,6 +553,29 @@ function wordRevealStep(word, remainingUnits = Infinity) {
   return delay;
 }
 
+function markRevealAncestors(unit) {
+  if (!unit || typeof unit.closest !== "function") {
+    return;
+  }
+  [
+    "li",
+    ".task-list-item",
+    "code",
+    "pre",
+    "blockquote",
+    ".markdown-table-wrap",
+    "table",
+    "tr",
+    "td",
+    "th",
+  ].forEach((selector) => {
+    const ancestor = unit.closest(selector);
+    if (ancestor) {
+      ancestor.classList.add("reveal-content-visible");
+    }
+  });
+}
+
 function startWordReveal(node, bubble, words) {
   const revealWords = Array.isArray(words) ? words : [];
 
@@ -591,6 +614,7 @@ function startWordReveal(node, bubble, words) {
       completeReveal();
       return;
     }
+    markRevealAncestors(word);
     word.classList.add("word-visible");
     wordIndex += 1;
     pinScroll(now);

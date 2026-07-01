@@ -3039,6 +3039,41 @@ input:focus-visible {
   animation: footerFadeIn 420ms ease forwards;
 }
 
+.message.learny.word-revealing .markdown-body li::marker {
+  color: transparent;
+  transition: color 220ms ease;
+}
+
+.message.learny.word-revealing .markdown-body li.reveal-content-visible::marker {
+  color: rgba(242, 242, 255, 0.84);
+}
+
+.message.learny.word-revealing .markdown-body .task-list-item input {
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+
+.message.learny.word-revealing .markdown-body .task-list-item.reveal-content-visible input {
+  opacity: 1;
+}
+
+.message.learny.word-revealing .markdown-body code,
+.message.learny.word-revealing .markdown-body pre,
+.message.learny.word-revealing .markdown-body blockquote,
+.message.learny.word-revealing .markdown-body .markdown-table-wrap {
+  transition:
+    opacity 260ms ease,
+    border-color 260ms ease,
+    background-color 260ms ease;
+}
+
+.message.learny.word-revealing .markdown-body code:not(.reveal-content-visible),
+.message.learny.word-revealing .markdown-body pre:not(.reveal-content-visible),
+.message.learny.word-revealing .markdown-body blockquote:not(.reveal-content-visible),
+.message.learny.word-revealing .markdown-body .markdown-table-wrap:not(.reveal-content-visible) {
+  opacity: 0;
+}
+
 .word-fade {
   display: none;
   opacity: 0;
