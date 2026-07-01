@@ -3301,7 +3301,7 @@ input:focus-visible {
 .composer {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 34px;
-  align-items: center;
+  align-items: end;
   gap: 6px;
   min-height: 54px;
   padding: 6px;
@@ -3319,7 +3319,7 @@ input:focus-visible {
 }
 
 .composer.unavailable *,
-.composer.unavailable input::placeholder {
+.composer.unavailable textarea::placeholder {
   cursor: not-allowed;
 }
 
@@ -3353,20 +3353,36 @@ input:focus-visible {
   transform: scale(1.03);
 }
 
-.composer input {
+.composer textarea {
   min-width: 0;
-  height: 38px;
+  width: 100%;
+  min-height: 38px;
+  max-height: min(240px, 34vh);
+  padding: 9px 0;
   border: 0;
   background: transparent;
   color: var(--text);
+  font: inherit;
+  line-height: 1.35;
   outline: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  resize: none;
+  scrollbar-width: none;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.composer input:disabled {
+.composer textarea::-webkit-scrollbar {
+  display: none;
+}
+
+.composer textarea:disabled {
   cursor: not-allowed;
 }
 
-.composer input::placeholder {
+.composer textarea::placeholder {
   color: #a7a7a7;
 }
 

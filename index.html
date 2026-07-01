@@ -278,15 +278,16 @@
                 multiple
                 accept=".txt,.md,.log,.docx,.rtf,.pdf,.csv,.json,.xml,text/plain,text/markdown,text/csv,application/json,application/xml,text/xml,application/pdf,application/rtf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               >
-              <input
+              <textarea
                 id="messageInput"
                 name="message"
-                type="text"
                 autocomplete="off"
                 placeholder="Ask anything"
                 maxlength="1200"
+                rows="1"
+                wrap="soft"
                 required
-              >
+              ></textarea>
               <button class="send-button" id="sendButton" type="submit" title="Send message">
                 <img class="ui-icon send-icon" src="./app/icon_library/send.png" alt="" aria-hidden="true">
                 <span class="sr-only">Send message</span>

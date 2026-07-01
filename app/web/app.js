@@ -653,6 +653,29 @@ function startWordReveal(node, bubble, words) {
   frameId = window.requestAnimationFrame(tick);
 }
 
+function autoResizeMessageInput() {
+  if (!messageInput) {
+    return;
+  }
+  const computedStyle = window.getComputedStyle(messageInput);
+  const maxHeight = Number.parseFloat(computedStyle.maxHeight);
+  const cappedMaxHeight = Number.isFinite(maxHeight) && maxHeight > 0 ? maxHeight : 240;
+
+  messageInput.style.height = "auto";
+  const nextHeight = Math.min(messageInput.scrollHeight, cappedMaxHeight);
+  messageInput.style.height = `${nextHeight}px`;
+  messageInput.style.overflowY = messageInput.scrollHeight > cappedMaxHeight ? "auto" : "hidden";
+}
+
+function resetMessageInputHeight() {
+  if (!messageInput) {
+    return;
+  }
+  messageInput.style.height = "";
+  messageInput.style.overflowY = "";
+  autoResizeMessageInput();
+}
+
 function scrollChatToBottom({ smooth = true } = {}) {
   if (!chatLog) {
     return;
@@ -3503,6 +3526,7 @@ function resetChat() {
 
   createChat();
   messageInput.value = "";
+  resetMessageInputHeight();
   messageInput.disabled = false;
   sendButton.disabled = false;
   if (attachButton) {
@@ -4097,9 +4121,28 @@ chatForm.addEventListener("submit", (event) => {
   }
   const attachments = [...selectedAttachments];
   messageInput.value = "";
+  resetMessageInputHeight();
   clearSelectedAttachments();
   askLearny(message, { attachments });
 });
+
+messageInput.addEventListener("input", autoResizeMessageInput);
+
+messageInput.addEventListener("keydown", (event) => {
+  if (
+    event.key === "Enter" &&
+    !event.shiftKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    !event.isComposing
+  ) {
+    event.preventDefault();
+    chatForm.requestSubmit();
+  }
+});
+
+autoResizeMessageInput();
 
 if (attachButton && fileInput) {
   attachButton.addEventListener("click", () => {
