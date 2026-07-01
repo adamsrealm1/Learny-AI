@@ -156,6 +156,15 @@ const ASK_RETRY_BASE_DELAY_MS = 1200;
 const ASK_RETRY_MAX_DELAY_MS = 3500;
 const ASK_REQUEST_TIMEOUT_MS = 10000;
 const RATE_LIMIT_REFRESH_MS = 5000;
+const UPDATE_CHECK_INTERVAL_MS = 30000;
+const UPDATE_BASELINE_SESSION_KEY = "learny-page-update-baseline";
+const UPDATE_BANNER_TEXT = "Learny AI has a new update. Refresh to get the latest version.";
+const GITHUB_COMMITS_API_URL = "https://api.github.com/repos/adamsrealm1/Learny-AI/commits?per_page=1";
+const GITHUB_TREE_API_BASE_URL = "https://api.github.com/repos/adamsrealm1/Learny-AI/git/trees/";
+const GITHUB_API_HEADERS = {
+  Accept: "application/vnd.github+json",
+};
+const UPDATE_FRONTEND_PATHS = new Set(["index.html", "app/web/app.js", "app/web/styles.css"]);
 const DEFAULT_RATE_LIMIT = {
   limit: 30,
   remaining: 30,
@@ -287,6 +296,12 @@ let activeView = "chat";
 let adminPortalData = null;
 let rateLimitRefreshTimerId = null;
 let rateLimitPopupTimerId = null;
+let updateCheckTimerId = null;
+let updateCheckInFlight = false;
+let updateBaselineCommit = "";
+let updateBanner = null;
+let updateBannerVisible = false;
+let updateCurrentBlobShasPromise = null;
 let platformRefreshTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
@@ -353,6 +368,249 @@ function buildApiBaseCandidates() {
     return ["", WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
   }
   return ["", WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
+}
+
+function normalizeCommitSha(value) {
+  const sha = String(value || "").trim().toLowerCase();
+  return /^[a-f0-9]{7,40}$/.test(sha) ? sha : "";
+}
+
+function readUpdateBaselineCommit() {
+  try {
+    return normalizeCommitSha(sessionStorage.getItem(UPDATE_BASELINE_SESSION_KEY));
+  } catch {
+    return "";
+  }
+}
+
+function rememberUpdateBaselineCommit(sha) {
+  updateBaselineCommit = normalizeCommitSha(sha);
+  if (!updateBaselineCommit) {
+    return;
+  }
+  try {
+    sessionStorage.setItem(UPDATE_BASELINE_SESSION_KEY, updateBaselineCommit);
+  } catch {
+    // Browsers can block sessionStorage. The in-memory baseline still works for this tab.
+  }
+}
+
+function createUpdateBanner() {
+  if (updateBanner) {
+    return updateBanner;
+  }
+
+  const banner = document.createElement("button");
+  banner.type = "button";
+  banner.className = "page-update-banner";
+  banner.textContent = UPDATE_BANNER_TEXT;
+  banner.addEventListener("click", () => window.location.reload());
+  document.body.prepend(banner);
+  updateBanner = banner;
+  return banner;
+}
+
+function showUpdateBanner() {
+  if (updateBannerVisible) {
+    return;
+  }
+  updateBannerVisible = true;
+  createUpdateBanner();
+  document.body.classList.add("page-update-available");
+}
+
+function currentPageUrl() {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  return url.toString();
+}
+
+function updateTrackedResources() {
+  const resources = [
+    {
+      path: "index.html",
+      url: currentPageUrl(),
+    },
+    {
+      path: "app/web/app.js",
+      url: APP_SCRIPT_URL.toString(),
+    },
+  ];
+  const stylesheet = document.querySelector('link[rel="stylesheet"][href*="app/web/styles.css"]');
+  if (stylesheet && stylesheet.href) {
+    resources.push({
+      path: "app/web/styles.css",
+      url: stylesheet.href,
+    });
+  }
+  return resources;
+}
+
+function shouldVerifyLoadedFrontend() {
+  const host = window.location.hostname.toLowerCase();
+  return (
+    window.location.protocol === "https:" &&
+    (host === "learny.env.pm" || host.endsWith(".github.io") || host.endsWith(".wasmer.app"))
+  );
+}
+
+async function gitBlobShaForText(text) {
+  if (!window.crypto?.subtle || typeof TextEncoder === "undefined") {
+    return "";
+  }
+
+  const encoder = new TextEncoder();
+  const contentBytes = encoder.encode(text);
+  const headerBytes = encoder.encode(`blob ${contentBytes.length}\0`);
+  const blobBytes = new Uint8Array(headerBytes.length + contentBytes.length);
+  blobBytes.set(headerBytes, 0);
+  blobBytes.set(contentBytes, headerBytes.length);
+
+  try {
+    const digest = await window.crypto.subtle.digest("SHA-1", blobBytes);
+    return [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    return "";
+  }
+}
+
+async function currentFrontendBlobShas() {
+  if (updateCurrentBlobShasPromise) {
+    return updateCurrentBlobShasPromise;
+  }
+
+  updateCurrentBlobShasPromise = Promise.all(
+    updateTrackedResources().map(async (resource) => {
+      try {
+        const response = await fetch(resource.url, { cache: "force-cache" });
+        if (!response.ok) {
+          return null;
+        }
+        const sha = await gitBlobShaForText(await response.text());
+        return sha ? [resource.path, sha] : null;
+      } catch {
+        return null;
+      }
+    }),
+  ).then((entries) => new Map(entries.filter(Boolean)));
+
+  return updateCurrentBlobShasPromise;
+}
+
+async function latestGithubCommitInfo() {
+  if (typeof fetch !== "function") {
+    return null;
+  }
+
+  try {
+    const response = await fetch(GITHUB_COMMITS_API_URL, {
+      cache: "no-store",
+      headers: GITHUB_API_HEADERS,
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    const latest = Array.isArray(data) ? data[0] : data;
+    const sha = normalizeCommitSha(latest?.sha);
+    const treeSha = normalizeCommitSha(latest?.commit?.tree?.sha);
+    return sha ? { sha, treeSha } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function latestFrontendBlobShas(treeSha) {
+  if (!treeSha || typeof fetch !== "function") {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${GITHUB_TREE_API_BASE_URL}${treeSha}?recursive=1`, {
+      cache: "no-store",
+      headers: GITHUB_API_HEADERS,
+    });
+    if (!response.ok) {
+      return null;
+    }
+    const data = await response.json();
+    const files = Array.isArray(data?.tree) ? data.tree : [];
+    return new Map(
+      files
+        .filter((file) => file?.type === "blob" && UPDATE_FRONTEND_PATHS.has(file.path))
+        .map((file) => [file.path, normalizeCommitSha(file.sha)]),
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function loadedFrontendMatchesLatest(treeSha) {
+  if (!shouldVerifyLoadedFrontend()) {
+    return null;
+  }
+
+  const [currentShas, latestShas] = await Promise.all([
+    currentFrontendBlobShas(),
+    latestFrontendBlobShas(treeSha),
+  ]);
+  if (!currentShas || currentShas.size === 0 || !latestShas || latestShas.size === 0) {
+    return null;
+  }
+
+  for (const [path, currentSha] of currentShas) {
+    const latestSha = latestShas.get(path);
+    if (latestSha && currentSha && latestSha !== currentSha) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function checkForPageUpdate() {
+  if (updateBannerVisible || updateCheckInFlight) {
+    return;
+  }
+
+  updateCheckInFlight = true;
+  try {
+    const latestCommit = await latestGithubCommitInfo();
+    if (!latestCommit) {
+      return;
+    }
+
+    const pageMatchesLatest = await loadedFrontendMatchesLatest(latestCommit.treeSha);
+    if (pageMatchesLatest === false) {
+      showUpdateBanner();
+      return;
+    }
+
+    if (!updateBaselineCommit) {
+      rememberUpdateBaselineCommit(latestCommit.sha);
+      return;
+    }
+
+    if (latestCommit.sha !== updateBaselineCommit) {
+      if (pageMatchesLatest === true) {
+        rememberUpdateBaselineCommit(latestCommit.sha);
+        return;
+      }
+      showUpdateBanner();
+    }
+  } finally {
+    updateCheckInFlight = false;
+  }
+}
+
+function startUpdateWatcher() {
+  if (updateCheckTimerId) {
+    return;
+  }
+  updateBaselineCommit = readUpdateBaselineCommit();
+  checkForPageUpdate();
+  updateCheckTimerId = window.setInterval(checkForPageUpdate, UPDATE_CHECK_INTERVAL_MS);
 }
 
 function createId(prefix) {
@@ -4520,4 +4778,5 @@ loadAccountAndChats();
 loadPlatformState();
 loadRateLimit();
 loadCaptchaConfig();
+startUpdateWatcher();
 releaseLoadingScreen();

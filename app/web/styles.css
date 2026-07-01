@@ -48,6 +48,44 @@ body.sidebar-lock {
   overflow: hidden;
 }
 
+.page-update-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 18px;
+  border: 0;
+  border-radius: 0;
+  color: #130f00;
+  background: #ffd83d;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  font-size: 0.95rem;
+  font-weight: 850;
+  line-height: 1.2;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(-100%);
+  animation: pageUpdateBannerIn 240ms ease forwards;
+}
+
+.page-update-banner:hover {
+  background: #ffe066;
+}
+
+.page-update-banner:active {
+  background: #f2c400;
+}
+
+.page-update-banner:focus-visible {
+  outline: 2px solid rgba(0, 0, 0, 0.86);
+  outline-offset: -5px;
+}
+
 button,
 input {
   font: inherit;
@@ -75,6 +113,13 @@ input:focus-visible {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+@keyframes pageUpdateBannerIn {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .app-shell {
