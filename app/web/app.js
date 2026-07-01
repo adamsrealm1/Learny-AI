@@ -3120,7 +3120,7 @@ function startUserMessageEdit(node, messageIndex, originalText) {
   const textarea = document.createElement("textarea");
   textarea.className = "message-edit-input";
   textarea.name = "editedMessage";
-  textarea.maxLength = 1200;
+  textarea.maxLength = 4096;
   textarea.rows = Math.min(8, Math.max(2, originalText.split(/\r?\n/).length));
   textarea.value = originalText;
   textarea.setAttribute("aria-label", "Edit message");
