@@ -140,6 +140,9 @@ const MESSAGE_DELETE_DURATION_MS = 850;
 const WORD_REVEAL_STEP_MS = 52;
 const WORD_REVEAL_DURATION_MS = 300;
 const WORD_REVEAL_FOOTER_DELAY_MS = 850;
+const WORD_REVEAL_COMMA_PAUSE_MS = 92;
+const WORD_REVEAL_SENTENCE_PAUSE_MS = 180;
+const WORD_REVEAL_MAX_WORDS_PER_FRAME = 4;
 const WELCOME_TEXT = "What's on your mind?";
 const MOBILE_SIDEBAR_QUERY = "(max-width: 860px)";
 const DIRECT_FILE_MODE = window.location.protocol === "file:";
@@ -416,12 +419,13 @@ function renderMessageHtml(text) {
     : escapePlainText(text);
 }
 
-function animateWords(container) {
+function prepareWordReveal(container) {
   if (!container || !("NodeFilter" in window)) {
-    return 0;
+    return [];
   }
 
   const textNodes = [];
+  const words = [];
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
     acceptNode(node) {
       if (!node.nodeValue || !node.nodeValue.trim()) {
@@ -456,9 +460,7 @@ function animateWords(container) {
       word.style.animationDuration = `${WORD_REVEAL_DURATION_MS}ms`;
       word.textContent = `${pendingWhitespace}${part}`;
       fragment.append(word);
-      window.setTimeout(() => {
-        word.classList.add("word-visible");
-      }, wordIndex * WORD_REVEAL_STEP_MS);
+      words.push(word);
       pendingWhitespace = "";
       wordIndex += 1;
     });
@@ -468,14 +470,166 @@ function animateWords(container) {
     node.replaceWith(fragment);
   });
 
-  return wordIndex;
+  return words;
 }
 
-function wordRevealDuration(wordCount) {
-  if (!Number.isFinite(wordCount) || wordCount <= 0) {
-    return 0;
+function wordRevealStep(word) {
+  const text = String(word && word.textContent ? word.textContent : "").trim();
+  if (/[.!?)]$/.test(text)) {
+    return WORD_REVEAL_SENTENCE_PAUSE_MS;
   }
-  return (wordCount - 1) * WORD_REVEAL_STEP_MS + WORD_REVEAL_DURATION_MS;
+  if (/[,;:]$/.test(text)) {
+    return WORD_REVEAL_COMMA_PAUSE_MS;
+  }
+  if (text.length > 12) {
+    return WORD_REVEAL_STEP_MS + 18;
+  }
+  return WORD_REVEAL_STEP_MS;
+}
+
+function createRevealToggleButton() {
+  const button = document.createElement("button");
+  button.className = "reveal-toggle-button";
+  button.type = "button";
+  button.title = "Pause typing";
+  button.setAttribute("aria-label", "Pause typing");
+
+  const icon = document.createElement("span");
+  icon.className = "reveal-toggle-icon";
+  icon.setAttribute("aria-hidden", "true");
+  button.append(icon);
+  return button;
+}
+
+function syncRevealToggleButton(button, paused) {
+  if (!button) {
+    return;
+  }
+  button.classList.toggle("is-paused", paused);
+  button.title = paused ? "Resume typing" : "Pause typing";
+  button.setAttribute("aria-label", paused ? "Resume typing" : "Pause typing");
+}
+
+function startWordReveal(node, bubble, words) {
+  const revealWords = Array.isArray(words) ? words : [];
+  const controls = document.createElement("div");
+  controls.className = "message-reveal-controls";
+  const toggleButton = createRevealToggleButton();
+  controls.append(toggleButton);
+  bubble.append(controls);
+
+  let wordIndex = 0;
+  let frameId = 0;
+  let nextRevealAt = performance.now();
+  let remainingDelay = 0;
+  let paused = false;
+  let completed = false;
+  let lastPinnedScrollAt = 0;
+
+  function pinScroll(now) {
+    if (!chatLog || now - lastPinnedScrollAt < 46) {
+      return;
+    }
+    lastPinnedScrollAt = now;
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function completeReveal() {
+    if (completed) {
+      return;
+    }
+    completed = true;
+    if (frameId) {
+      window.cancelAnimationFrame(frameId);
+      frameId = 0;
+    }
+    controls.classList.add("is-complete");
+    window.setTimeout(() => {
+      controls.remove();
+      node.classList.add("reveal-complete");
+      scrollChatToBottom({ smooth: false });
+    }, WORD_REVEAL_FOOTER_DELAY_MS);
+  }
+
+  function revealNextWord(now) {
+    const word = revealWords[wordIndex];
+    if (!word) {
+      completeReveal();
+      return;
+    }
+    word.classList.add("word-visible");
+    wordIndex += 1;
+    pinScroll(now);
+    nextRevealAt = now + wordRevealStep(word);
+  }
+
+  function tick(now) {
+    if (completed) {
+      return;
+    }
+    if (!node.isConnected) {
+      completeReveal();
+      return;
+    }
+    if (paused) {
+      return;
+    }
+    if (wordIndex >= revealWords.length) {
+      completeReveal();
+      return;
+    }
+    let wordsThisFrame = 0;
+    while (
+      wordIndex < revealWords.length &&
+      now >= nextRevealAt &&
+      wordsThisFrame < WORD_REVEAL_MAX_WORDS_PER_FRAME
+    ) {
+      revealNextWord(now);
+      wordsThisFrame += 1;
+    }
+    frameId = window.requestAnimationFrame(tick);
+  }
+
+  function pauseReveal() {
+    if (paused || completed) {
+      return;
+    }
+    paused = true;
+    remainingDelay = Math.max(0, nextRevealAt - performance.now());
+    if (frameId) {
+      window.cancelAnimationFrame(frameId);
+      frameId = 0;
+    }
+    node.classList.add("reveal-paused");
+    syncRevealToggleButton(toggleButton, true);
+  }
+
+  function resumeReveal() {
+    if (!paused || completed) {
+      return;
+    }
+    paused = false;
+    nextRevealAt = performance.now() + remainingDelay;
+    node.classList.remove("reveal-paused");
+    syncRevealToggleButton(toggleButton, false);
+    frameId = window.requestAnimationFrame(tick);
+  }
+
+  toggleButton.addEventListener("click", () => {
+    if (paused) {
+      resumeReveal();
+    } else {
+      pauseReveal();
+    }
+  });
+
+  if (revealWords.length === 0) {
+    completeReveal();
+    return { pause: pauseReveal, resume: resumeReveal };
+  }
+
+  frameId = window.requestAnimationFrame(tick);
+  return { pause: pauseReveal, resume: resumeReveal };
 }
 
 function scrollChatToBottom({ smooth = true } = {}) {
@@ -3109,16 +3263,10 @@ function displayMessage(
   const textNode = document.createElement("div");
   textNode.className = "bubble-text markdown-body";
   textNode.innerHTML = renderMessageHtml(text);
-  let revealDuration = 0;
-  let pinnedScrollDuration = 0;
+  let revealWords = [];
   if (shouldAnimateWords && speaker === "Learny") {
-    const wordCount = animateWords(textNode);
-    revealDuration = wordRevealDuration(wordCount);
-    pinnedScrollDuration = revealDuration + WORD_REVEAL_FOOTER_DELAY_MS + 520;
+    revealWords = prepareWordReveal(textNode);
     node.classList.add("word-revealing");
-    window.setTimeout(() => {
-      node.classList.add("reveal-complete");
-    }, revealDuration + WORD_REVEAL_FOOTER_DELAY_MS);
   }
   bubble.replaceChildren(textNode);
   if (speaker === "You") {
@@ -3137,12 +3285,12 @@ function displayMessage(
   }
 
   chatLog.append(node);
+  if (shouldAnimateWords && speaker === "Learny") {
+    startWordReveal(node, bubble, revealWords);
+  }
   updateMessageSearch();
   if (autoScroll) {
     scrollChatToBottom({ smooth: smoothScroll });
-  }
-  if (pinnedScrollDuration > 0) {
-    keepChatPinnedToBottom(pinnedScrollDuration);
   }
   return node;
 }
