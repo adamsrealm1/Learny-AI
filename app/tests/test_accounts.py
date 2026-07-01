@@ -123,6 +123,69 @@ class AccountWebTests(unittest.TestCase):
         self.assertEqual(account["stats"]["chats"], 0)
         self.assertEqual(account["stats"]["messages"], 0)
 
+    def test_account_session_token_authenticates_when_cookie_is_unavailable(self) -> None:
+        with run_account_server() as server:
+            created = server.post_json(
+                "/api/accounts/create",
+                {
+                    "username": "header_session_user",
+                    "email": "header@example.com",
+                    "password": "strong-password",
+                },
+            )
+            token = created["accountSessionToken"]
+
+            no_cookie_request = urllib.request.Request(
+                f"{server.base_url}/api/account",
+                method="GET",
+            )
+            with urllib.request.urlopen(no_cookie_request, timeout=10) as response:
+                no_cookie_account = json.loads(response.read().decode("utf-8"))
+
+            session_headers = {"X-Learny-Account-Session": token}
+            account_request = urllib.request.Request(
+                f"{server.base_url}/api/account",
+                headers=session_headers,
+                method="GET",
+            )
+            with urllib.request.urlopen(account_request, timeout=10) as response:
+                header_account = json.loads(response.read().decode("utf-8"))
+
+            chats_request = urllib.request.Request(
+                f"{server.base_url}/api/chats",
+                headers=session_headers,
+                method="GET",
+            )
+            with urllib.request.urlopen(chats_request, timeout=10) as response:
+                header_chats = json.loads(response.read().decode("utf-8"))
+
+            sign_out_request = urllib.request.Request(
+                f"{server.base_url}/api/accounts/sign-out",
+                data=json.dumps({}).encode("utf-8"),
+                headers={"Content-Type": "application/json", **session_headers},
+                method="POST",
+            )
+            with urllib.request.urlopen(sign_out_request, timeout=10) as response:
+                sign_out = json.loads(response.read().decode("utf-8"))
+
+            signed_out_request = urllib.request.Request(
+                f"{server.base_url}/api/account",
+                headers=session_headers,
+                method="GET",
+            )
+            with urllib.request.urlopen(signed_out_request, timeout=10) as response:
+                signed_out_account = json.loads(response.read().decode("utf-8"))
+
+        self.assertTrue(created["authenticated"])
+        self.assertIsInstance(token, str)
+        self.assertGreater(len(token), 20)
+        self.assertFalse(no_cookie_account["authenticated"])
+        self.assertTrue(header_account["authenticated"])
+        self.assertEqual(header_account["account"]["username"], "header_session_user")
+        self.assertEqual(header_chats["chats"], [])
+        self.assertFalse(sign_out["authenticated"])
+        self.assertFalse(signed_out_account["authenticated"])
+
     def test_create_account_requires_email_and_sign_in_email_is_optional(self) -> None:
         with run_account_server() as server:
             missing_email = server.post_json_status(
@@ -1184,6 +1247,7 @@ class AccountWebTests(unittest.TestCase):
 
         self.assertEqual(headers["origin"], "https://learny.env.pm")
         self.assertEqual(headers["credentials"], ["true"])
+        self.assertIn("X-Learny-Account-Session", headers["allowed_headers"])
 
     def test_cross_site_account_cookie_uses_secure_none_samesite(self) -> None:
         with run_account_server() as server:
@@ -1582,6 +1646,7 @@ class run_account_server:
             return {
                 "origin": response.headers.get("Access-Control-Allow-Origin"),
                 "credentials": response.headers.get_all("Access-Control-Allow-Credentials"),
+                "allowed_headers": response.headers.get("Access-Control-Allow-Headers", ""),
             }
 
 

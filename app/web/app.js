@@ -114,6 +114,7 @@ const CHATS_KEY = "learny-chats";
 const ACTIVE_CHAT_KEY = "learny-active-chat-id";
 const SESSION_KEY = "learny-session-id";
 const RATE_LIMIT_SESSION_KEY = "learny-rate-limit-session-id";
+const ACCOUNT_SESSION_KEY = "learny-account-session-token";
 const APP_SCRIPT_SOURCE =
   document.currentScript?.getAttribute("src") ||
   document.querySelector('script[src*="app.js"]')?.getAttribute("src") ||
@@ -270,6 +271,7 @@ let chats = [];
 let activeChatId = "";
 let sessionId = "";
 let rateLimitSessionId = localStorage.getItem(RATE_LIMIT_SESSION_KEY) || "";
+let accountSessionToken = localStorage.getItem(ACCOUNT_SESSION_KEY) || "";
 let isSending = false;
 let chatSearchQuery = "";
 let messageSearchQuery = "";
@@ -1198,6 +1200,20 @@ function clearStoredChatState() {
   localStorage.removeItem(SESSION_KEY);
 }
 
+function storeAccountSessionToken(token) {
+  const cleanToken = String(token || "").trim();
+  accountSessionToken = cleanToken;
+  if (cleanToken) {
+    localStorage.setItem(ACCOUNT_SESSION_KEY, cleanToken);
+  } else {
+    localStorage.removeItem(ACCOUNT_SESSION_KEY);
+  }
+}
+
+function clearAccountSessionToken() {
+  storeAccountSessionToken("");
+}
+
 function normalizeRateLimit(rateLimit) {
   if (!rateLimit || typeof rateLimit !== "object") {
     return { ...DEFAULT_RATE_LIMIT };
@@ -1697,11 +1713,15 @@ function syncCaptchaButtons() {
     }
     const requiresCaptcha = isCaptchaEnabled();
     const missingCaptcha = requiresCaptcha && !control.token;
+    const allowAuthClickToExplainCaptcha = name === "signIn" || name === "createAccount";
     const missingAttachmentPassword =
       name === "attachment" &&
       attachmentAuthPassword &&
       !String(attachmentAuthPassword.value || "").trim();
-    control.button.disabled = Boolean(missingCaptcha || missingAttachmentPassword);
+    control.button.disabled = Boolean(
+      (missingCaptcha && !allowAuthClickToExplainCaptcha) ||
+      missingAttachmentPassword,
+    );
   });
 }
 
@@ -2505,6 +2525,7 @@ function clearSignedInLocalState() {
   currentAccountStats = null;
   serverChatsLoaded = false;
   clearAttachmentVerification();
+  clearAccountSessionToken();
   chats = [];
   activeChatId = "";
   sessionId = "";
@@ -2676,6 +2697,7 @@ async function loadAccountAndChats() {
       currentAccountStats = null;
       serverChatsLoaded = false;
       clearAttachmentVerification();
+      clearAccountSessionToken();
       trimChatsToAllowedLimit(GUEST_CHAT_LIMIT);
       clearStoredChatState();
       updateAccountButton();
@@ -2692,13 +2714,21 @@ async function loadAccountAndChats() {
     currentAccountStats = accountData.stats || null;
     updateAccountButton();
 
-    const chatData = await apiFetch(
-      "/api/chats",
-      { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
-      activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
-    );
-    const remoteChats = normalizeServerChats(chatData.chats);
-    serverChatsLoaded = true;
+    let remoteChats = [];
+    try {
+      const chatData = await apiFetch(
+        "/api/chats",
+        { timeoutMs: STATUS_FETCH_TIMEOUT_MS },
+        activeApiBase ? [activeApiBase, ...API_BASE_CANDIDATES] : API_BASE_CANDIDATES,
+      );
+      remoteChats = normalizeServerChats(chatData.chats);
+      serverChatsLoaded = true;
+    } catch (error) {
+      serverChatsLoaded = false;
+      renderChatList();
+      renderActiveChat();
+      return accountData;
+    }
 
     if (remoteChats.length > 0) {
       chats = remoteChats;
@@ -2727,6 +2757,7 @@ async function loadAccountAndChats() {
     currentAccountStats = null;
     serverChatsLoaded = false;
     clearAttachmentVerification();
+    clearAccountSessionToken();
     trimChatsToAllowedLimit(GUEST_CHAT_LIMIT);
     clearStoredChatState();
     updateAccountButton();
@@ -3657,6 +3688,9 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
       if (rateLimitSessionId && !("X-Learny-Rate-Session" in requestHeaders)) {
         requestHeaders["X-Learny-Rate-Session"] = rateLimitSessionId;
       }
+      if (accountSessionToken && !("X-Learny-Account-Session" in requestHeaders)) {
+        requestHeaders["X-Learny-Account-Session"] = accountSessionToken;
+      }
       const timeZone = clientTimeZone();
       if (timeZone && !("X-Learny-Time-Zone" in requestHeaders)) {
         requestHeaders["X-Learny-Time-Zone"] = timeZone;
@@ -3918,6 +3952,7 @@ async function handleAccountAuthSubmit(form, messageNode, endpoint, captchaName)
     if (!data.authenticated || !data.account) {
       throw new Error(GENERIC_ERROR_MESSAGE);
     }
+    storeAccountSessionToken(data.accountSessionToken);
     currentAccount = data.account;
     currentAccountStats = data.stats || null;
     clearAttachmentVerification();

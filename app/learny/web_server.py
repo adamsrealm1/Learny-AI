@@ -56,6 +56,7 @@ DEFAULT_STATIC_DIR = PROJECT_ROOT / "web"
 DEFAULT_STATIC_ROOT = PROJECT_ROOT
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data"
 ACCOUNT_SESSION_COOKIE = "learny_account"
+ACCOUNT_SESSION_HEADER = "X-Learny-Account-Session"
 PUBLIC_ROOT_FILES = {
     "index.html",
 }
@@ -313,7 +314,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
                 self.send_header(
                     "Access-Control-Allow-Headers",
-                    "Content-Type, X-Learny-Session, X-Learny-Rate-Session, X-Learny-Time-Zone",
+                    "Content-Type, X-Learny-Session, X-Learny-Rate-Session, X-Learny-Time-Zone, X-Learny-Account-Session",
                 )
                 self.send_header("Access-Control-Max-Age", "86400")
                 self.end_headers()
@@ -420,6 +421,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 {
                     "authenticated": True,
                     "account": _public_account(account),
+                    "accountSessionToken": token,
                     "stats": database.account_stats(int(account["id"])),
                     "platform": _public_platform(database.platform_state()),
                     "ban": None,
@@ -460,6 +462,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 {
                     "authenticated": True,
                     "account": _public_account(account),
+                    "accountSessionToken": token,
                     "stats": database.account_stats(int(account["id"])),
                     "platform": _public_platform(database.platform_state()),
                     "ban": None,
@@ -468,7 +471,7 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             )
 
         def _handle_sign_out(self) -> None:
-            database.delete_session(self._account_session_token())
+            self._delete_current_account_sessions()
             self._send_json(
                 {"authenticated": False, "account": None, "stats": None},
                 extra_headers=[_clear_account_cookie_header(self._needs_cross_site_cookie())],
@@ -958,7 +961,11 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
             self.wfile.write(payload)
 
         def _current_account(self) -> dict[str, Any] | None:
-            return database.get_account_for_session(self._account_session_token())
+            for token in self._account_session_tokens():
+                account = database.get_account_for_session(token)
+                if account is not None:
+                    return account
+            return None
 
         def _require_admin_account(self) -> dict[str, Any] | None:
             account = self._current_account()
@@ -1016,16 +1023,30 @@ def create_handler(config: WebServerConfig) -> type[BaseHTTPRequestHandler]:
                 return "unknown"
 
         def _account_session_token(self) -> str | None:
+            tokens = self._account_session_tokens()
+            return tokens[0] if tokens else None
+
+        def _account_session_tokens(self) -> list[str]:
+            tokens: list[str] = []
+            header_token = self.headers.get(ACCOUNT_SESSION_HEADER, "").strip()
+            if header_token:
+                tokens.append(header_token)
+
             cookie = SimpleCookie()
             try:
                 cookie.load(self.headers.get("Cookie", ""))
             except Exception:
-                return None
+                return tokens
             morsel = cookie.get(ACCOUNT_SESSION_COOKIE)
-            if morsel is None:
-                return None
-            token = morsel.value.strip()
-            return token or None
+            if morsel is not None:
+                cookie_token = morsel.value.strip()
+                if cookie_token and cookie_token not in tokens:
+                    tokens.append(cookie_token)
+            return tokens
+
+        def _delete_current_account_sessions(self) -> None:
+            for token in self._account_session_tokens():
+                database.delete_session(token)
 
         def _read_ask_body(self) -> dict[str, Any]:
             content_type = self.headers.get("Content-Type", "")
