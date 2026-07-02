@@ -146,6 +146,7 @@ const WORD_REVEAL_COMMA_PAUSE_MS = 92;
 const WORD_REVEAL_SENTENCE_PAUSE_MS = 180;
 const WORD_REVEAL_MAX_WORDS_PER_FRAME = 4;
 const WORD_REVEAL_END_SPLIT_LETTERS = 8;
+const WORD_REVEAL_END_EFFECT_MAX_WORDS = 48;
 const WORD_REVEAL_END_SLOWDOWN_UNITS = 7;
 const WORD_REVEAL_END_SLOWDOWN_MULTIPLIER = 4.2;
 const WORD_REVEAL_END_SLOWDOWN_MAX_MS = 420;
@@ -575,7 +576,7 @@ function renderMessageHtml(text) {
 
 function prepareWordReveal(container) {
   if (!container || !("NodeFilter" in window)) {
-    return [];
+    return { words: [], useEndSlowdown: false };
   }
 
   const textNodes = [];
@@ -624,7 +625,12 @@ function prepareWordReveal(container) {
     node.replaceWith(fragment);
   });
 
-  return splitRevealTailLetters(words);
+  const useEndSlowdown =
+    words.length > 0 && words.length <= WORD_REVEAL_END_EFFECT_MAX_WORDS;
+  return {
+    words: useEndSlowdown ? splitRevealTailLetters(words) : words,
+    useEndSlowdown,
+  };
 }
 
 function createRevealUnit(text) {
@@ -675,7 +681,7 @@ function splitRevealTailLetters(words) {
   return revealUnits;
 }
 
-function wordRevealStep(word, remainingUnits = Infinity) {
+function wordRevealStep(word, remainingUnits = Infinity, useEndSlowdown = false) {
   const text = String(word && word.textContent ? word.textContent : "").trim();
   let delay = WORD_REVEAL_STEP_MS;
   if (/[.!?)]$/.test(text)) {
@@ -686,6 +692,7 @@ function wordRevealStep(word, remainingUnits = Infinity) {
     delay = WORD_REVEAL_STEP_MS + 18;
   }
   if (
+    useEndSlowdown &&
     Number.isFinite(remainingUnits) &&
     remainingUnits > 0 &&
     remainingUnits <= WORD_REVEAL_END_SLOWDOWN_UNITS
@@ -726,8 +733,9 @@ function markRevealAncestors(unit) {
   });
 }
 
-function startWordReveal(node, bubble, words) {
+function startWordReveal(node, bubble, words, options = {}) {
   const revealWords = Array.isArray(words) ? words : [];
+  const useEndSlowdown = Boolean(options.useEndSlowdown);
 
   let wordIndex = 0;
   let frameId = 0;
@@ -768,7 +776,11 @@ function startWordReveal(node, bubble, words) {
     word.classList.add("word-visible");
     wordIndex += 1;
     pinScroll(now);
-    nextRevealAt = now + wordRevealStep(word, revealWords.length - wordIndex);
+    nextRevealAt = now + wordRevealStep(
+      word,
+      revealWords.length - wordIndex,
+      useEndSlowdown,
+    );
   }
 
   function tick(now) {
@@ -3490,8 +3502,11 @@ function displayMessage(
   textNode.className = "bubble-text markdown-body";
   textNode.innerHTML = renderMessageHtml(text);
   let revealWords = [];
+  let useEndSlowdown = false;
   if (shouldAnimateWords && speaker === "Learny") {
-    revealWords = prepareWordReveal(textNode);
+    const revealPlan = prepareWordReveal(textNode);
+    revealWords = revealPlan.words;
+    useEndSlowdown = revealPlan.useEndSlowdown;
     node.classList.add("word-revealing");
   }
   bubble.replaceChildren(textNode);
@@ -3512,7 +3527,7 @@ function displayMessage(
 
   chatLog.append(node);
   if (shouldAnimateWords && speaker === "Learny") {
-    startWordReveal(node, bubble, revealWords);
+    startWordReveal(node, bubble, revealWords, { useEndSlowdown });
   }
   updateMessageSearch();
   if (autoScroll) {
