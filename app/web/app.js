@@ -33,6 +33,7 @@ const attachmentAuthModal = document.querySelector("#attachmentAuthModal");
 const attachmentAuthBackdrop = document.querySelector("#attachmentAuthBackdrop");
 const attachmentAuthClose = document.querySelector("#attachmentAuthClose");
 const attachmentAuthForm = document.querySelector("#attachmentAuthForm");
+const attachmentAuthUsername = document.querySelector("#attachmentAuthUsername");
 const attachmentAuthPassword = document.querySelector("#attachmentAuthPassword");
 const attachmentAuthOk = document.querySelector("#attachmentAuthOk");
 const attachmentAuthMessage = document.querySelector("#attachmentAuthMessage");
@@ -158,13 +159,11 @@ const ASK_REQUEST_TIMEOUT_MS = 10000;
 const RATE_LIMIT_REFRESH_MS = 5000;
 const UPDATE_CHECK_INTERVAL_MS = 30000;
 const UPDATE_BASELINE_SESSION_KEY = "learny-page-update-baseline";
-const UPDATE_BANNER_TEXT = "Learny AI has a new update. Refresh to get the latest version.";
+const UPDATE_BANNER_TEXT = "Learny AI has a new update! Refresh to go to the latest version.";
 const GITHUB_COMMITS_API_URL = "https://api.github.com/repos/adamsrealm1/Learny-AI/commits?per_page=1";
-const GITHUB_TREE_API_BASE_URL = "https://api.github.com/repos/adamsrealm1/Learny-AI/git/trees/";
 const GITHUB_API_HEADERS = {
   Accept: "application/vnd.github+json",
 };
-const UPDATE_FRONTEND_PATHS = new Set(["index.html", "app/web/app.js", "app/web/styles.css"]);
 const DEFAULT_RATE_LIMIT = {
   limit: 30,
   remaining: 30,
@@ -181,6 +180,7 @@ const GENERIC_ERROR_MESSAGE = "Something went wrong. Try again later.";
 const UNKNOWN_ANSWER_MESSAGE = "I do not know that yet.";
 const WASMER_API_BASE = "https://learny-ai-adamsrealm1.wasmer.app";
 const WASMER_API_FALLBACK_BASE = "https://learny-ai.wasmer.app";
+const STATIC_FRONTEND_HOSTS = new Set(["learnyai.net", "www.learnyai.net"]);
 const API_BASE_CANDIDATES = buildApiBaseCandidates();
 const DESKTOP_STAR_COUNT = 360;
 const MOBILE_STAR_COUNT = 230;
@@ -299,9 +299,9 @@ let rateLimitPopupTimerId = null;
 let updateCheckTimerId = null;
 let updateCheckInFlight = false;
 let updateBaselineCommit = "";
+let latestKnownUpdateCommit = "";
 let updateBanner = null;
 let updateBannerVisible = false;
-let updateCurrentBlobShasPromise = null;
 let platformRefreshTimerId = null;
 let serverChatsLoaded = false;
 let serverSyncTimerId = null;
@@ -357,7 +357,7 @@ function buildApiBaseCandidates() {
   const host = window.location.hostname.toLowerCase();
   const wasmerHost = new URL(WASMER_API_BASE).hostname;
   const wasmerFallbackHost = new URL(WASMER_API_FALLBACK_BASE).hostname;
-  if (host === "learny.env.pm" || host.endsWith(".github.io")) {
+  if (STATIC_FRONTEND_HOSTS.has(host) || host.endsWith(".github.io")) {
     return [WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
   }
   if (host === wasmerHost || host === wasmerFallbackHost) {
@@ -368,6 +368,20 @@ function buildApiBaseCandidates() {
     return ["", WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
   }
   return ["", WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
+}
+
+function sameOriginApiAllowed() {
+  const host = window.location.hostname.toLowerCase();
+  return !STATIC_FRONTEND_HOSTS.has(host) && !host.endsWith(".github.io");
+}
+
+function normalizeApiBases(apiBases) {
+  const bases = [...new Set(apiBases.filter((base) => typeof base === "string"))];
+  const allowedBases = sameOriginApiAllowed() ? bases : bases.filter(Boolean);
+  if (allowedBases.length > 0) {
+    return allowedBases;
+  }
+  return sameOriginApiAllowed() ? [""] : [WASMER_API_BASE, WASMER_API_FALLBACK_BASE];
 }
 
 function normalizeCommitSha(value) {
@@ -404,7 +418,12 @@ function createUpdateBanner() {
   banner.type = "button";
   banner.className = "page-update-banner";
   banner.textContent = UPDATE_BANNER_TEXT;
-  banner.addEventListener("click", () => window.location.reload());
+  banner.addEventListener("click", () => {
+    if (latestKnownUpdateCommit) {
+      rememberUpdateBaselineCommit(latestKnownUpdateCommit);
+    }
+    window.location.reload();
+  });
   document.body.prepend(banner);
   updateBanner = banner;
   return banner;
@@ -419,89 +438,18 @@ function showUpdateBanner() {
   document.body.classList.add("page-update-available");
 }
 
-function currentPageUrl() {
-  const url = new URL(window.location.href);
-  url.hash = "";
-  return url.toString();
-}
-
-function updateTrackedResources() {
-  const resources = [
-    {
-      path: "index.html",
-      url: currentPageUrl(),
-    },
-    {
-      path: "app/web/app.js",
-      url: APP_SCRIPT_URL.toString(),
-    },
-  ];
-  const stylesheet = document.querySelector('link[rel="stylesheet"][href*="app/web/styles.css"]');
-  if (stylesheet && stylesheet.href) {
-    resources.push({
-      path: "app/web/styles.css",
-      url: stylesheet.href,
-    });
-  }
-  return resources;
-}
-
-function shouldVerifyLoadedFrontend() {
-  const host = window.location.hostname.toLowerCase();
-  return (
-    window.location.protocol === "https:" &&
-    (host === "learny.env.pm" || host.endsWith(".github.io") || host.endsWith(".wasmer.app"))
-  );
-}
-
-async function gitBlobShaForText(text) {
-  if (!window.crypto?.subtle || typeof TextEncoder === "undefined") {
-    return "";
-  }
-
-  const encoder = new TextEncoder();
-  const contentBytes = encoder.encode(text);
-  const headerBytes = encoder.encode(`blob ${contentBytes.length}\0`);
-  const blobBytes = new Uint8Array(headerBytes.length + contentBytes.length);
-  blobBytes.set(headerBytes, 0);
-  blobBytes.set(contentBytes, headerBytes.length);
-
+function pageLoadedByRefresh() {
   try {
-    const digest = await window.crypto.subtle.digest("SHA-1", blobBytes);
-    return [...new Uint8Array(digest)]
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
+    const [navigation] = performance.getEntriesByType("navigation");
+    return navigation && navigation.type === "reload";
   } catch {
-    return "";
+    return false;
   }
 }
 
-async function currentFrontendBlobShas() {
-  if (updateCurrentBlobShasPromise) {
-    return updateCurrentBlobShasPromise;
-  }
-
-  updateCurrentBlobShasPromise = Promise.all(
-    updateTrackedResources().map(async (resource) => {
-      try {
-        const response = await fetch(resource.url, { cache: "force-cache" });
-        if (!response.ok) {
-          return null;
-        }
-        const sha = await gitBlobShaForText(await response.text());
-        return sha ? [resource.path, sha] : null;
-      } catch {
-        return null;
-      }
-    }),
-  ).then((entries) => new Map(entries.filter(Boolean)));
-
-  return updateCurrentBlobShasPromise;
-}
-
-async function latestGithubCommitInfo() {
+async function latestGithubCommitSha() {
   if (typeof fetch !== "function") {
-    return null;
+    return "";
   }
 
   try {
@@ -514,59 +462,10 @@ async function latestGithubCommitInfo() {
     }
     const data = await response.json();
     const latest = Array.isArray(data) ? data[0] : data;
-    const sha = normalizeCommitSha(latest?.sha);
-    const treeSha = normalizeCommitSha(latest?.commit?.tree?.sha);
-    return sha ? { sha, treeSha } : null;
+    return normalizeCommitSha(latest?.sha);
   } catch {
-    return null;
+    return "";
   }
-}
-
-async function latestFrontendBlobShas(treeSha) {
-  if (!treeSha || typeof fetch !== "function") {
-    return null;
-  }
-
-  try {
-    const response = await fetch(`${GITHUB_TREE_API_BASE_URL}${treeSha}?recursive=1`, {
-      cache: "no-store",
-      headers: GITHUB_API_HEADERS,
-    });
-    if (!response.ok) {
-      return null;
-    }
-    const data = await response.json();
-    const files = Array.isArray(data?.tree) ? data.tree : [];
-    return new Map(
-      files
-        .filter((file) => file?.type === "blob" && UPDATE_FRONTEND_PATHS.has(file.path))
-        .map((file) => [file.path, normalizeCommitSha(file.sha)]),
-    );
-  } catch {
-    return null;
-  }
-}
-
-async function loadedFrontendMatchesLatest(treeSha) {
-  if (!shouldVerifyLoadedFrontend()) {
-    return null;
-  }
-
-  const [currentShas, latestShas] = await Promise.all([
-    currentFrontendBlobShas(),
-    latestFrontendBlobShas(treeSha),
-  ]);
-  if (!currentShas || currentShas.size === 0 || !latestShas || latestShas.size === 0) {
-    return null;
-  }
-
-  for (const [path, currentSha] of currentShas) {
-    const latestSha = latestShas.get(path);
-    if (latestSha && currentSha && latestSha !== currentSha) {
-      return false;
-    }
-  }
-  return true;
 }
 
 async function checkForPageUpdate() {
@@ -576,27 +475,18 @@ async function checkForPageUpdate() {
 
   updateCheckInFlight = true;
   try {
-    const latestCommit = await latestGithubCommitInfo();
+    const latestCommit = await latestGithubCommitSha();
     if (!latestCommit) {
       return;
     }
-
-    const pageMatchesLatest = await loadedFrontendMatchesLatest(latestCommit.treeSha);
-    if (pageMatchesLatest === false) {
-      showUpdateBanner();
-      return;
-    }
+    latestKnownUpdateCommit = latestCommit;
 
     if (!updateBaselineCommit) {
-      rememberUpdateBaselineCommit(latestCommit.sha);
+      rememberUpdateBaselineCommit(latestCommit);
       return;
     }
 
-    if (latestCommit.sha !== updateBaselineCommit) {
-      if (pageMatchesLatest === true) {
-        rememberUpdateBaselineCommit(latestCommit.sha);
-        return;
-      }
+    if (latestCommit !== updateBaselineCommit) {
       showUpdateBanner();
     }
   } finally {
@@ -608,7 +498,7 @@ function startUpdateWatcher() {
   if (updateCheckTimerId) {
     return;
   }
-  updateBaselineCommit = readUpdateBaselineCommit();
+  updateBaselineCommit = pageLoadedByRefresh() ? "" : readUpdateBaselineCommit();
   checkForPageUpdate();
   updateCheckTimerId = window.setInterval(checkForPageUpdate, UPDATE_CHECK_INTERVAL_MS);
 }
@@ -2136,6 +2026,9 @@ function openAttachmentAuthPopup() {
 
   if (attachmentAuthForm) {
     attachmentAuthForm.reset();
+  }
+  if (attachmentAuthUsername) {
+    attachmentAuthUsername.value = currentAccount && currentAccount.username ? currentAccount.username : "";
   }
   if (attachmentAuthMessage) {
     attachmentAuthMessage.textContent = "";
@@ -3913,10 +3806,7 @@ async function apiFetch(path, options = {}, apiBases = [activeApiBase]) {
   }
 
   const { timeoutMs = 0, headers = {}, ...fetchOptions } = options;
-  const basesToTry = [...new Set(apiBases.filter((base) => typeof base === "string"))];
-  if (basesToTry.length === 0) {
-    basesToTry.push("");
-  }
+  const basesToTry = normalizeApiBases(apiBases);
 
   let lastError = null;
   const startedAt = performance.now();

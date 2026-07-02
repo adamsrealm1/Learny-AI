@@ -1245,7 +1245,7 @@ class AccountWebTests(unittest.TestCase):
         with run_account_server() as server:
             headers = server.options_headers("/api/status")
 
-        self.assertEqual(headers["origin"], "https://learny.env.pm")
+        self.assertEqual(headers["origin"], "https://learnyai.net")
         self.assertEqual(headers["credentials"], ["true"])
         self.assertIn("X-Learny-Account-Session", headers["allowed_headers"])
 
@@ -1254,7 +1254,7 @@ class AccountWebTests(unittest.TestCase):
             headers = server.post_json_headers(
                 "/api/accounts/create",
                 {"username": "cross_site_user", "password": "strong-password"},
-                {"Origin": "https://learny.env.pm"},
+                {"Origin": "https://learnyai.net"},
             )
 
         cookies = headers.get_all("Set-Cookie")
@@ -1636,7 +1636,7 @@ class run_account_server:
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             headers={
-                "Origin": "https://learny.env.pm",
+                "Origin": "https://learnyai.net",
                 "Access-Control-Request-Method": "GET",
                 "Access-Control-Request-Headers": "content-type,x-learny-session",
             },

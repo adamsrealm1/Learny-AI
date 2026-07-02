@@ -61,7 +61,8 @@ PUBLIC_ROOT_FILES = {
     "index.html",
 }
 ALLOWED_CORS_ORIGINS = {
-    "https://learny.env.pm",
+    "https://learnyai.net",
+    "https://www.learnyai.net",
     "https://learny-ai.wasmer.app",
     "https://learny-ai-adamsrealm1.wasmer.app",
 }

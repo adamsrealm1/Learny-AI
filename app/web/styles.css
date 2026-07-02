@@ -3346,7 +3346,7 @@ input:focus-visible {
 .composer {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) 34px;
-  align-items: end;
+  align-items: start;
   gap: 6px;
   min-height: 54px;
   padding: 6px;
@@ -3370,11 +3370,17 @@ input:focus-visible {
 
 .attach-button,
 .send-button {
+  align-self: start;
   width: 34px;
   height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  margin-top: 4px;
+  padding: 0;
   border-radius: 50%;
   color: var(--text);
   font-size: 1rem;
+  line-height: 1;
 }
 
 .attach-button {
@@ -4176,12 +4182,16 @@ body.ban-lock-active .loading-screen {
   .composer {
     grid-template-columns: 32px minmax(0, 1fr) 32px;
     min-height: 58px;
+    align-items: start;
   }
 
   .attach-button,
   .send-button {
     width: 32px;
     height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    margin-top: 4px;
   }
 
   .bubble {
